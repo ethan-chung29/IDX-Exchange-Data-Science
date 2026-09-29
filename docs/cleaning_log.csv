@@ -1,0 +1,20 @@
+step,rows_removed,values_nulled,values_filled,rows_after
+start,0,0,0,615707
+not Residential / SingleFamilyResidence,305972,0,0,309735
+state not CA,22,0,0,309713
+duplicate ListingKey (kept latest update),264,0,0,309449
+"ClosePrice missing or < $10,000",9,0,0,309440
+"close/list ratio outside [0.5, 2.0] or no ListPrice",225,0,0,309215
+"LivingArea missing or outside [300, 20,000]",327,0,0,308888
+"price per sqft outside [$50, $5,000]",125,0,0,308763
+YearBuilt < 1850 or after close year + 1,0,7,0,308763
+BedroomsTotal <= 0 or > 20,0,117,0,308763
+BathroomsTotalInteger <= 0 or > 20,0,80,0,308763
+GarageSpaces < 0 or > 20,0,48,0,308763
+ParkingTotal < 0 or > 50,0,230,0,308763
+"DaysOnMarket < 0 or > 3,650",0,42,0,308763
+AssociationFee < 0,0,0,0,308763
+LotSizeSquareFeet filled from LotSizeAcres,0,0,21,308763
+"LotSizeSquareFeet <= 0 or > 1,000 acres",0,350,0,308763
+Latitude/Longitude outside California,0,62,0,308763
+final,0,0,0,308763
