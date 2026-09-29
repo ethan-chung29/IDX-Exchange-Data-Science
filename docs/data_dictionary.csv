@@ -1,0 +1,88 @@
+column,description,dtype,pct_missing,n_unique,example
+Flooring,"Comma-separated list of flooring types (Carpet, Wood, Tile, ...).",str,41.2,348,"Carpet,Tile,Wood"
+ViewYN,"True if the property has a view (ocean, mountain, city, ...).",object,10.0,2,True
+WaterfrontYN,True if the property is on the waterfront.,object,99.9,1,True
+BasementYN,True if the home has a basement.,object,98.4,1,True
+PoolPrivateYN,True if the property has a private pool.,object,12.5,2,False
+OriginalListPrice,"First asking price when the listing went live, before any price changes ($).",float64,0.3,24641,499000.0
+ListingKey,Unique system ID for the listing record.,int64,0.0,615113,
+ListAgentEmail,Listing agent email (PII).,str,0.2,96468,
+CloseDate,Date the sale closed (title transferred).,datetime64[us],0.0,851,2024-01-26 00:00:00
+ClosePrice,TARGET. Final sale price the property closed at ($).,float64,0.0,31885,240000.0
+ListAgentFirstName,Listing agent first name (PII).,str,0.6,17388,
+ListAgentLastName,Listing agent last name (PII).,str,0.0,38552,
+Latitude,Latitude of the property.,float64,0.9,472634,
+Longitude,Longitude of the property.,float64,0.9,489806,
+UnparsedAddress,Full street address as one string (PII — do not display).,str,0.2,573859,
+PropertyType,"Top-level category (Residential, ResidentialLease, Land, Commercial, ...).",str,0.0,8,Residential
+LivingArea,Finished living space (sq ft). Key size feature.,float64,7.0,8319,1140.0
+ListPrice,Asking price at the time of sale ($). Strongly correlated with ClosePrice — beware leakage.,float64,0.2,24267,295000.0
+DaysOnMarket,Days between listing and going under contract.,int64,0.0,1152,777
+ListOfficeName,Listing brokerage.,str,0.0,21766,Coldwell Banker Realty
+BuyerOfficeName,Buyer's brokerage.,str,1.2,24425,Bay Area Senior Services
+CoListOfficeName,Co-listing brokerage.,str,78.6,6337,Keller Williams Realty Phelan
+ListAgentFullName,Listing agent full name (PII).,str,0.0,89059,
+CoListAgentFirstName,Co-listing agent first name (PII).,str,79.3,7468,
+CoListAgentLastName,Co-listing agent last name (PII).,str,79.3,15662,
+BuyerAgentMlsId,Buyer's agent MLS ID.,str,0.3,137251,
+BuyerAgentFirstName,Buyer's agent first name (PII).,str,0.4,21135,
+BuyerAgentLastName,Buyer's agent last name (PII).,str,0.1,44142,
+FireplacesTotal,Number of fireplaces.,float64,100.0,0,
+AssociationFeeFrequency,"How often the HOA fee is charged (Monthly, Annually, ...).",str,70.4,4,Monthly
+AboveGradeFinishedArea,Finished sq ft above ground level.,float64,100.0,0,
+ListingKeyNumeric,Numeric version of ListingKey.,int64,0.0,615113,
+MLSAreaMajor,MLS-defined neighborhood/area code + name.,str,11.0,1128,699 - Not Defined
+TaxAnnualAmount,Annual property tax ($).,float64,99.6,1800,204.0
+CountyOrParish,County the property is in.,str,0.0,63,San Mateo
+MlsStatus,Listing status in the MLS — 'Closed' for every row (checked in section 3).,str,0.0,1,Closed
+ElementarySchool,Assigned elementary school.,str,88.9,1423,Other
+AttachedGarageYN,True if the garage is attached to the home.,object,27.7,2,False
+ParkingTotal,Total parking spaces (garage + other).,float64,3.1,312,1.0
+BuilderName,Builder of the home (mostly for new construction).,str,96.2,4047,BOSA
+PropertySubType,"Specific type (SingleFamilyResidence, Condominium, Townhouse, ...).",str,7.6,34,Condominium
+LotSizeAcres,"Lot size in acres (should equal LotSizeSquareFeet / 43,560).",float64,9.4,25812,1.2
+SubdivisionName,Name of the subdivision / tract / community.,str,64.7,19941,National City
+BuyerOfficeAOR,Buyer's office Association of Realtors.,str,4.5,70,MLSListings
+YearBuilt,Year the home was built. Use to derive property age.,float64,4.2,171,1988.0
+BuyerAgencyCompensationType,Unit of BuyerAgencyCompensation (% or $).,str,86.1,3,Item1
+StreetNumberNumeric,Street number of the address.,float64,0.2,50616,
+ListingId,MLS number shown to agents/public.,str,0.0,615113,
+BathroomsTotalInteger,"Total bathrooms, rounded to an integer.",float64,4.6,74,2.0
+City,City the property is in.,str,0.1,1244,San Mateo
+BuyerAgencyCompensation,Commission offered to the buyer's agent (only in some files).,float64,86.1,331,2.5
+TaxYear,Year the tax amount applies to.,float64,99.9,14,2011.0
+BuildingAreaTotal,"Total building sq ft, including unfinished areas.",float64,87.0,8248,510.0
+BedroomsTotal,Total number of bedrooms.,float64,6.6,74,2.0
+ContractStatusChangeDate,Date of the most recent status change on the listing.,datetime64[us],0.1,851,2024-01-26 00:00:00
+ElementarySchoolDistrict,Elementary school district.,float64,100.0,0,
+CoBuyerAgentFirstName,Co-buyer agent first name (PII).,str,91.9,4933,
+PurchaseContractDate,Date the buyer's offer was accepted (went under contract).,datetime64[us],2.0,1269,2023-11-22 00:00:00
+ListingContractDate,Date the listing agreement was signed / listing started.,datetime64[us],0.0,1851,2021-10-06 00:00:00
+BelowGradeFinishedArea,Finished sq ft below ground (basement).,float64,99.6,168,0.0
+BusinessType,Type of business (for business-opportunity listings only).,str,99.7,785,Other
+StateOrProvince,State. CA for all but ~80 rows (out-of-state listings).,str,0.0,25,CA
+CoveredSpaces,Number of covered parking spaces.,float64,100.0,0,
+MiddleOrJuniorSchool,Assigned middle / junior high school.,str,88.8,669,Other
+FireplaceYN,True if the home has a fireplace.,object,8.7,2,True
+Stories,Number of stories in the home.,float64,19.9,2,2.0
+HighSchool,Assigned high school.,str,85.5,525,Half Moon Bay
+Levels,"Text description of levels (One, Two, Multi/Split, ...).",str,13.7,19,Two
+LotSizeDimensions,Lot dimensions as text (e.g. '50x120').,str,94.8,13483,Irregular
+LotSizeArea,Lot size as entered by the agent (units vary).,float64,9.1,50124,52320.0
+MainLevelBedrooms,Bedrooms on the main (entry) level.,float64,46.9,38,2.0
+NewConstructionYN,True if the home is newly built.,object,11.9,2,False
+GarageSpaces,Number of garage parking spaces.,float64,12.8,70,1.0
+HighSchoolDistrict,High school district.,str,33.4,447,Other
+PostalCode,ZIP code.,str,0.0,4280,94401
+AssociationFee,HOA fee amount ($).,float64,31.0,10469,6472.0
+LotSizeSquareFeet,Lot size in square feet.,float64,9.2,50212,52320.0
+MiddleOrJuniorSchoolDistrict,Middle school district.,float64,100.0,0,
+latfilled,Flag: True if Latitude was imputed (only in _filled files).,object,73.7,2,
+lonfilled,Flag: True if Longitude was imputed (only in _filled files).,object,73.7,2,
+source_file,(Added) CSV file the row came from.,str,0.0,28,CRMLSSold202401_filled.csv
+is_filled_file,(Added) True if the row came from a *_filled.csv file.,bool,0.0,2,True
+BuyerAgentAOR,Buyer's agent Association of Realtors (only in some files).,str,14.9,63,Southland
+ListAgentAOR,Listing agent's Association of Realtors (only in some files).,str,14.0,59,Southland
+OriginatingSystemName,MLS system the record came from (only in some files).,str,89.2,1,CRMLS
+OriginatingSystemSubName,Sub-MLS the record came from (only in some files).,str,89.2,10,CRMLS_BMLS
+close_month,(Added) Year-month of CloseDate.,period[M],0.0,28,2024-01
