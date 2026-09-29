@@ -111,7 +111,8 @@ def clean(raw, rules=RULES):
 
     # 2. Duplicates: same listing re-recorded (usually a corrected CloseDate).
     #    Keep the most recently updated record.
-    df = df.sort_values(["ListingKey", "ContractStatusChangeDate", "CloseDate", "source_file"])
+    # na_position="first" so a record with no update date never counts as the latest
+    df = df.sort_values(["ListingKey", "ContractStatusChangeDate", "CloseDate", "source_file"], na_position="first")
     df = log.drop(df, df.duplicated("ListingKey", keep="last"), "duplicate ListingKey (kept latest update)")
 
     # 3. Target sanity
