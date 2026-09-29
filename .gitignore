@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data - never commit raw data
+*.csv
+data/
+
+# macOS
+.DS_Store
