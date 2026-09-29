@@ -223,3 +223,6 @@ data/
 
 # macOS
 .DS_Store
+
+# Allow our own documentation tables
+!docs/*.csv
