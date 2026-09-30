@@ -4,11 +4,16 @@ Usage (from the repo root):
     python src/cleaning.py
 
 Writes:
-    data/processed/sfr_clean.parquet  - one row per sale, git-ignored
+    data/processed/sfr_clean.csv      - one row per sale, git-ignored
+    data/processed/sfr_clean.parquet  - same table with dtypes preserved (faster to load)
     docs/cleaning_log.csv             - rows removed / values nulled per step (counts only)
 
-Every rule lives in RULES so thresholds can be changed in one place once the team
-agrees on them. See notebooks/02_cleaning.ipynb for the reasoning behind each one.
+Every rule lives in RULES so thresholds can be changed in one place.
+See notebooks/02_preprocessing.ipynb for the reasoning behind each one.
+
+This step removes rows that are clearly wrong (typos, impossible values) using fixed
+thresholds on all data. The 0.5th/99.5th percentile ClosePrice cut is a separate step
+applied at the train/test split, with cutoffs computed on the training set only.
 """
 
 import glob
@@ -20,6 +25,7 @@ import pandas as pd
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 OUT_PATH = os.path.join(DATA_DIR, "processed", "sfr_clean.parquet")
+CSV_PATH = os.path.join(DATA_DIR, "processed", "sfr_clean.csv")
 LOG_PATH = os.path.join(REPO_ROOT, "docs", "cleaning_log.csv")
 
 RULES = {
@@ -58,6 +64,14 @@ DROP_COLS = [
     "ElementarySchoolDistrict", "MiddleOrJuniorSchoolDistrict",
     "BelowGradeFinishedArea", "BuildingAreaTotal", "LotSizeDimensions", "LotSizeArea",
     "latfilled", "lonfilled",
+]
+
+# Kept in the clean table (needed for data-quality checks) but never used as model features.
+# Per the IDX Best Practices doc: list prices and DOM leak the answer, and these dates are
+# only known once the home is listed / under contract / closed.
+LEAKAGE_COLS = [
+    "ListPrice", "OriginalListPrice", "DaysOnMarket",
+    "ListingContractDate", "PurchaseContractDate", "ContractStatusChangeDate", "CloseDate",
 ]
 
 # Only "True" is ever recorded for these, so missing means "not flagged"
@@ -187,9 +201,10 @@ def main():
     df, log = clean(raw)
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     df.to_parquet(OUT_PATH, index=False)
+    df.to_csv(CSV_PATH, index=False)
     log.to_csv(LOG_PATH, index=False)
     print(log.to_string(index=False))
-    print(f"\n{len(df):,} rows x {df.shape[1]} columns -> {os.path.relpath(OUT_PATH, REPO_ROOT)}")
+    print(f"\n{len(df):,} rows x {df.shape[1]} columns -> {os.path.relpath(CSV_PATH, REPO_ROOT)} (+ .parquet)")
 
 
 if __name__ == "__main__":
