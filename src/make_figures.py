@@ -116,6 +116,35 @@ def median_price_by_county(df, top=10):
     _save(fig, "median_price_by_county.png")
 
 
+def feature_distributions(df):
+    fig, axes = plt.subplots(2, 2, figsize=(10, 6.4))
+    la = df["LivingArea"]
+    axes[0, 0].hist(la[la.between(la.quantile(0.01), la.quantile(0.995))], bins=60, color=SERIES, edgecolor=SURFACE, linewidth=0.5)
+    axes[0, 0].set_title("Living area (sq ft)", fontsize=11)
+    axes[0, 0].xaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}"))
+    for ax, col, label in [(axes[0, 1], "BedroomsTotal", "Bedrooms"), (axes[1, 0], "BathroomsTotalInteger", "Bathrooms")]:
+        counts = df[col].clip(upper=7).value_counts().sort_index()
+        ax.bar(counts.index, counts.values, color=SERIES, width=0.7)
+        ax.set_xticks(range(1, 8), [str(k) for k in range(1, 7)] + ["7+"])
+        ax.grid(axis="x", visible=False)
+        ax.set_title(label, fontsize=11)
+    lot = df["LotSizeSquareFeet"].dropna()
+    lot = lot[lot.between(lot.quantile(0.01), lot.quantile(0.995))]
+    bins = np.logspace(np.log10(lot.min()), np.log10(lot.max()), 60)
+    axes[1, 1].hist(lot, bins=bins, color=SERIES, edgecolor=SURFACE, linewidth=0.5)
+    axes[1, 1].set_xscale("log")
+    axes[1, 1].xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x / 1e3:,.0f}k" if x >= 1e3 else f"{x:,.0f}"))
+    axes[1, 1].set_title("Lot size (sq ft, log scale)", fontsize=11)
+    for ax in axes.flat:
+        ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}"))
+    axes[0, 0].set_ylabel("sales")
+    axes[1, 0].set_ylabel("sales")
+    fig.suptitle("Key property features after cleaning (1st–99.5th percentile shown for size and lot)",
+                 x=0.01, ha="left", fontsize=13, fontweight="bold", color=TEXT)
+    fig.tight_layout()
+    _save(fig, "feature_distributions.png")
+
+
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
     df = pd.read_parquet(CLEAN_PATH)
@@ -124,6 +153,7 @@ def main():
     price_distribution(df)
     median_price_by_month(df)
     median_price_by_county(df)
+    feature_distributions(df)
 
 
 if __name__ == "__main__":
