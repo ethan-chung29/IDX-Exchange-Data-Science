@@ -107,6 +107,9 @@ class _Log:
         cols = ["step", "rows_removed", "values_nulled", "values_filled", "rows_after"]
         out = pd.DataFrame(self.rows).reindex(columns=cols)
         out[cols[1:]] = out[cols[1:]].fillna(0).astype(int)
+        # % of the rows that entered each step (Best Practices: log count AND percentage)
+        rows_before = out["rows_after"] + out["rows_removed"]
+        out.insert(2, "pct_removed", (100 * out["rows_removed"] / rows_before).round(3))
         return out
 
 
@@ -128,6 +131,11 @@ def clean(raw, rules=RULES):
     # na_position="first" so a record with no update date never counts as the latest
     df = df.sort_values(["ListingKey", "ContractStatusChangeDate", "CloseDate", "source_file"], na_position="first")
     df = log.drop(df, df.duplicated("ListingKey", keep="last"), "duplicate ListingKey (kept latest update)")
+
+    # Logically impossible timelines: a sale cannot close before it was listed or went under contract.
+    # (An offer dated before the listing date is kept: pre-listing / off-MLS offers do happen.)
+    df = log.drop(df, df["CloseDate"] < df["ListingContractDate"], "CloseDate before ListingContractDate")
+    df = log.drop(df, df["CloseDate"] < df["PurchaseContractDate"], "CloseDate before PurchaseContractDate")
 
     # 3. Target sanity
     df = log.drop(df, df["ClosePrice"].isna() | (df["ClosePrice"] < rules["min_close_price"]),
