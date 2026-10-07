@@ -93,6 +93,24 @@ def make_split(df, train_months=DEFAULT_TRAIN_MONTHS, test_month=None, quantiles
     return train, val, test, info
 
 
+def make_final_split(df, train_months, test_month=None, quantiles=PRICE_QUANTILES):
+    """For the final fit once the window is chosen: train = the `train_months` months right
+    before the test month (validation month included), test = test month. Cutoffs come from
+    this training window only. Returns (train, test, info)."""
+    months = pd.PeriodIndex(df["close_month"], freq="M")
+    test_period = months.max() if test_month is None else pd.Period(test_month, freq="M")
+    if train_months < 1 or train_months > (test_period - months.min()).n:
+        raise ValueError(f"not enough history for a {train_months}-month window before {test_period}")
+    train_raw = df[(months >= test_period - train_months) & (months < test_period)]
+    test_raw = df[months == test_period]
+    cutoffs = fit_price_cutoffs(train_raw, quantiles)
+    train, test = apply_price_cutoffs(train_raw, cutoffs), apply_price_cutoffs(test_raw, cutoffs)
+    info = {"train_months": train_months, "train_start": train["close_month"].min(),
+            "train_end": train["close_month"].max(), "test_month": str(test_period),
+            "train_rows": len(train), "price_low": round(cutoffs[0]), "price_high": round(cutoffs[1])}
+    return train, test, info
+
+
 def compare_windows(df, windows=WINDOWS_TO_COMPARE, test_month=None):
     """One row per training-window length: date range, cutoffs and row counts."""
     return pd.DataFrame([make_split(df, w, test_month)[3] for w in windows])
