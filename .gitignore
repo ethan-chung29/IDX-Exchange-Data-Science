@@ -226,3 +226,6 @@ data/
 
 # Allow our own documentation tables
 !docs/*.csv
+
+# Trained model artifacts (rebuild with python src/models.py)
+models/

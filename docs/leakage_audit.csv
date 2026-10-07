@@ -1,0 +1,50 @@
+column,verdict,reason
+Flooring,excluded,comma-separated list; planned as multi-hot features in Week 6
+ViewYN,feature,physical or location fact known before any sale
+WaterfrontYN,feature,physical or location fact known before any sale
+BasementYN,feature,physical or location fact known before any sale
+PoolPrivateYN,feature,physical or location fact known before any sale
+OriginalListPrice,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+ListingKey,excluded,identifier
+CloseDate,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+ClosePrice,excluded,target (modeled as log_close_price)
+Latitude,feature,physical or location fact known before any sale
+Longitude,feature,physical or location fact known before any sale
+LivingArea,feature,physical or location fact known before any sale
+ListPrice,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+DaysOnMarket,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+AssociationFeeFrequency,excluded,used only to build hoa_monthly
+MLSAreaMajor,feature,physical or location fact known before any sale
+CountyOrParish,feature,physical or location fact known before any sale
+ElementarySchool,excluded,too sparse (> 60% missing)
+AttachedGarageYN,feature,physical or location fact known before any sale
+ParkingTotal,feature,physical or location fact known before any sale
+BuilderName,excluded,too sparse (> 60% missing)
+SubdivisionName,excluded,too sparse (> 60% missing) and mostly placeholder values
+YearBuilt,excluded,replaced by property_age (age at time of sale)
+BathroomsTotalInteger,feature,physical or location fact known before any sale
+City,feature,physical or location fact known before any sale
+BedroomsTotal,feature,physical or location fact known before any sale
+ContractStatusChangeDate,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+PurchaseContractDate,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+ListingContractDate,excluded: leakage,leakage: list price / DOM / listing-contract-close dates (Best Practices §04)
+MiddleOrJuniorSchool,excluded,too sparse (> 60% missing)
+FireplaceYN,feature,physical or location fact known before any sale
+Stories,feature,physical or location fact known before any sale
+HighSchool,excluded,too sparse (> 60% missing)
+Levels,feature,physical or location fact known before any sale
+MainLevelBedrooms,feature,physical or location fact known before any sale
+NewConstructionYN,feature,physical or location fact known before any sale
+GarageSpaces,feature,physical or location fact known before any sale
+HighSchoolDistrict,feature,physical or location fact known before any sale
+PostalCode,feature,physical or location fact known before any sale
+AssociationFee,excluded,replaced by hoa_monthly (fee normalized by its frequency)
+LotSizeSquareFeet,feature,physical or location fact known before any sale
+source_file,excluded,"data lineage, not a property attribute"
+coords_imputed,excluded,"artifact of which export file a row came from, unknown for most rows"
+close_month,excluded,split key; seasonality enters through month_sin / month_cos
+log_close_price,excluded,target
+property_age,feature,close year minus YearBuilt; at prediction time: valuation year minus YearBuilt
+month_sin,feature,"month of sale only (at prediction time: the valuation month), no price information"
+month_cos,feature,"month of sale only (at prediction time: the valuation month), no price information"
+hoa_monthly,feature,AssociationFee divided by its payment frequency; HOA dues are known before a sale
