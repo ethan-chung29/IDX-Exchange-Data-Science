@@ -22,6 +22,18 @@ Predict `ClosePrice` for California single-family homes from listing features (s
 - **Features:** 27 input columns → 89 model features (size, rooms, age at sale, HOA/month, location, seasonality as month sine/cosine). See `docs/leakage_audit.csv`.
 - **Leakage:** per the IDX Best Practices doc, `ListPrice`, `OriginalListPrice`, `DaysOnMarket` and post-listing / post-close dates are excluded as features (`cleaning.LEAKAGE_COLS`). They stay in the clean table only for data-quality checks.
 
+### Feature engineering (Week 6)
+
+Added flooring types and a **school-district layer** (spatial join of each home to the [CA School District Areas 2024-25](https://data.ca.gov/dataset/california-school-district-areas-2024-25) boundaries; 99.1% of homes matched). Bed/bath ratio and sq ft per bedroom were tested but made both tree models worse on validation, so they are not in the final `week6` set. District demographic shares are deliberately not used (fair-housing risk).
+
+| Test 2026-04 | Week 5 features | Week 6 features |
+|---|---|---|
+| Linear Regression | 11.23% MdAPE / R² 0.822 | **10.99% / 0.827** |
+| Decision Tree | 9.30% / 0.858 | 9.32% / 0.845 |
+| **Random Forest** | 7.60% / 0.896 | **7.52% / 0.897** (lower in all 4 test months) |
+
+Full old-vs-new table: `docs/feature_set_comparison.csv` and `notebooks/04b_feature_engineering.ipynb`.
+
 ### Model comparison (Week 5)
 
 Same features, pipeline and procedure for every model: training window and hyperparameters chosen on the 2026-03 validation month, then scored once on 2026-04. All three picked a 24-month window.
@@ -61,24 +73,28 @@ The model over-values entry-level homes (median +4.9% in the lowest price quinti
 
 ```
 data/                     raw CRMLS CSVs + download script (git-ignored, never commit)
+  external/               school-district boundary shapefile (download command below)
   processed/              sfr_clean.csv (+ .parquet), the cleaned modeling table
 docs/
   data_dictionary.csv     every column: description, type, % missing
   cleaning_log.csv        rows removed / values nulled by each cleaning step
   split_summary.csv       rows and price cutoffs for each training-window length
   leakage_audit.csv       every column: used as a feature or excluded, and why
-  metrics_*.csv           validation, test and backtest metrics per model
+  metrics_<model>__<features>.csv  validation, test and backtest metrics per model and feature set
+  feature_set_comparison.csv       old vs new feature sets (Week 6)
 models/                   trained model files (git-ignored; rebuild with python src/models.py)
   figures/                charts shown above
 notebooks/
   01_exploration.ipynb    exploratory data analysis and findings
   02_preprocessing.ipynb  cleaning rules, train/validation/test split, preprocessing pipeline
   03_baseline_model.ipynb Linear Regression baseline, backtest and error breakdown
-  04_model_comparison.ipynb  Linear Regression vs Decision Tree vs Random Forest
+  04_model_comparison.ipynb  Linear Regression vs Decision Tree vs Random Forest (Week 5 features)
+  04b_feature_engineering.ipynb  new features, school-district layer, old vs new feature sets
 src/
   cleaning.py             cleaning pipeline (thresholds in RULES)
   preprocessing.py        time-based train/validation/test split + train-only ClosePrice percentile cut
-  features.py             feature list, leakage audit and scikit-learn preprocessing pipeline
+  features.py             feature sets (week5 / week6 ...), leakage audit, scikit-learn preprocessing pipeline
+  geo.py                  school-district spatial join (CA School District Areas 2024-25)
   models.py               model registry; window + hyperparameter selection on validation, test, rolling backtest
   evaluation.py           R², MAPE, MdAPE, MAE, RMSE and breakdowns by price band / county
   make_figures.py         regenerates docs/figures/
@@ -93,9 +109,12 @@ pip install -r requirements.txt
 python src/cleaning.py        # writes data/processed/sfr_clean.csv (+ .parquet) and docs/cleaning_log.csv
 python src/make_figures.py    # regenerates docs/figures/
 python src/preprocessing.py --train-months 12   # writes data/processed/{train,val,test}.csv and docs/split_summary.csv
+mkdir -p data/external && curl -L -o data/external/ca_school_district_areas_2024_25.zip \
+  "https://gis.data.ca.gov/api/download/v1/items/b0e3b936426a47ce9d9a2e77e2bb86cc/shapefile?layers=0"
+python src/geo.py             # school-district join -> data/processed/school_districts.parquet
 python src/features.py        # writes docs/leakage_audit.csv
-python src/models.py          # trains all models (~17 min), writes docs/metrics_*.csv and models/
-python src/models.py random_forest   # or a single model
+python src/models.py          # trains all models on the week6 features (~12 min), writes docs/metrics_*.csv and models/
+python src/models.py --features week5 random_forest   # a single model / another feature set
 ```
 
 Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks locally to see their charts and tables.
@@ -107,6 +126,6 @@ Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks loc
 - **Training window:** picked per model on the **validation** month (24 months for the baseline); test is used once at the end.
 - **Baseline (done):** Linear Regression, see results above.
 - **Week 5 (done):** Decision Tree and Random Forest, see the comparison above.
-- **Week 6:** feature engineering (bed/bath ratio, flooring types, school-district spatial join) and an old-vs-new feature table.
+- **Week 6 (done):** flooring types + school-district layer, see above.
 - **Week 7:** gradient boosting (XGBoost / LightGBM) with light tuning on the validation month.
 - Confirm with the team how coordinates were imputed in the `_filled` files.
