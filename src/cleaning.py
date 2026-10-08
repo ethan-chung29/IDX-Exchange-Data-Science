@@ -36,6 +36,10 @@ RULES = {
     "price_per_sqft": (50, 5_000),
     "year_built_min": 1850,
     "max_lot_acres": 1_000,
+    # Lot "square feet" below this are acres typed into the wrong field (median 0.23 -> ~10,000 sq ft)
+    "lot_acres_entered_below": 10,
+    # Lots from that value up to this many sq ft can't be interpreted either way -> missing
+    "min_lot_sqft": 500,
     "max_bed_bath": 20,
     "max_garage_spaces": 20,
     "max_parking_total": 50,
@@ -176,6 +180,17 @@ def clean(raw, rules=RULES):
     log.null(df, "LotSizeSquareFeet",
              (df["LotSizeSquareFeet"] <= 0) | (df["LotSizeSquareFeet"] > rules["max_lot_acres"] * 43_560),
              f"LotSizeSquareFeet <= 0 or > {rules['max_lot_acres']:,} acres")
+    # Assumption (checked in EDA): a positive lot "square feet" value under 10 is acres entered in the
+    # wrong field. 99.7% of these lots were smaller than the house itself; one listing's dimensions
+    # text says "0.79 Acre". Values from 10 to 499 sq ft are ambiguous and become missing.
+    lot = df["LotSizeSquareFeet"]
+    acres_typed = (lot > 0) & (lot < rules["lot_acres_entered_below"])
+    df.loc[acres_typed, "LotSizeSquareFeet"] = lot[acres_typed] * 43_560
+    log.rows.append({"step": f"LotSizeSquareFeet < {rules['lot_acres_entered_below']} treated as acres (x 43,560)",
+                     "rows_removed": 0, "values_nulled": 0, "rows_after": len(df),
+                     "values_filled": int(acres_typed.sum())})
+    log.null(df, "LotSizeSquareFeet", df["LotSizeSquareFeet"] < rules["min_lot_sqft"],
+             f"LotSizeSquareFeet {rules['lot_acres_entered_below']}-{rules['min_lot_sqft'] - 1} (ambiguous units)")
     df = df.drop(columns="LotSizeAcres")
 
     # Coordinates outside California (includes 0,0 and sign errors)

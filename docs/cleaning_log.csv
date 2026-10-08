@@ -18,5 +18,7 @@ ParkingTotal < 0 or > 50,0,0.0,229,0,308525
 AssociationFee < 0,0,0.0,0,0,308525
 LotSizeSquareFeet filled from LotSizeAcres,0,0.0,0,21,308525
 "LotSizeSquareFeet <= 0 or > 1,000 acres",0,0.0,350,0,308525
+"LotSizeSquareFeet < 10 treated as acres (x 43,560)",0,0.0,0,337,308525
+LotSizeSquareFeet 10-499 (ambiguous units),0,0.0,46,0,308525
 Latitude/Longitude outside California,0,0.0,62,0,308525
 final,0,0.0,0,0,308525

@@ -17,6 +17,7 @@ Predict `ClosePrice` for California single-family homes from listing features (s
 - **Impossible timelines:** 238 sales closed before their listing or purchase-contract date and are removed (`docs/cleaning_log.csv` logs count and % for every step).
 - **Duplicates:** 580 listings appear 2–4 times across monthly files, usually the same sale re-recorded with a corrected close date. The most recently updated record is kept.
 - **Price typos:** 22 of the 31 sales above $50M are typos (e.g. $970M closing on a $975k list price). A close/list ratio band of [0.5, 2] removes them.
+- **Lot units:** 337 lot sizes under 10 "sq ft" (mostly San Diego and Riverside) are acres typed into the square-feet field and are converted; 46 ambiguous lots under 500 sq ft are set to missing.
 - **Coordinates:** `latfilled` / `lonfilled` in the `_filled` files are True/False flags meaning the coordinate was imputed. They are kept as `coords_imputed`.
 - **Features:** 27 input columns → 89 model features (size, rooms, age at sale, HOA/month, location, seasonality as month sine/cosine). See `docs/leakage_audit.csv`.
 - **Leakage:** per the IDX Best Practices doc, `ListPrice`, `OriginalListPrice`, `DaysOnMarket` and post-listing / post-close dates are excluded as features (`cleaning.LEAKAGE_COLS`). They stay in the clean table only for data-quality checks.
@@ -27,12 +28,12 @@ Trained on `log(ClosePrice)`; metrics in dollars. Window chosen on the 2026-03 v
 
 | Test month | R² | MdAPE | MAPE | MAE | Within 10% |
 |---|---|---|---|---|---|
-| **2026-04 (test)** | **0.822** | **11.3%** | 15.5% | $209k | 45% |
-| 2026-03 (backtest) | 0.817 | 11.2% | 15.1% | $201k | 46% |
-| 2026-02 (backtest) | 0.803 | 11.4% | 15.5% | $209k | 45% |
-| 2026-01 (backtest) | 0.788 | 11.3% | 15.7% | $201k | 45% |
+| **2026-04 (test)** | **0.822** | **11.2%** | 15.4% | $209k | 45% |
+| 2026-03 (backtest) | 0.817 | 11.1% | 15.1% | $201k | 46% |
+| 2026-02 (backtest) | 0.803 | 11.4% | 15.4% | $208k | 45% |
+| 2026-01 (backtest) | 0.788 | 11.3% | 15.7% | $200k | 45% |
 
-The model over-values entry-level homes (median +5% in the lowest price quintile) and under-values luxury homes (−10.6%, MdAPE 15.9% in the top quintile). Full breakdown in `notebooks/03_baseline_model.ipynb` and `docs/metrics_baseline_linear_regression.csv`.
+The model over-values entry-level homes (median +4.9% in the lowest price quintile) and under-values luxury homes (−10.6%, MdAPE 15.9% in the top quintile). Full breakdown in `notebooks/03_baseline_model.ipynb` and `docs/metrics_baseline_linear_regression.csv`.
 
 ![Rows removed by each cleaning step](docs/figures/cleaning_steps.png)
 
