@@ -1,6 +1,7 @@
 geopandas==1.2.0
 ipykernel==7.4.0
 jupyter==1.1.1
+lightgbm==4.7.0
 matplotlib==3.11.2
 nbstripout==0.9.1
 numpy==2.4.6
@@ -10,3 +11,4 @@ pyogrio==0.13.0
 pyproj==3.7.2
 scikit-learn==1.9.1
 shapely==2.2.0
+xgboost==3.2.0

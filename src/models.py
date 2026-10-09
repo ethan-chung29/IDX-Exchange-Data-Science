@@ -1,5 +1,8 @@
 """Model training, model/window selection, test evaluation and rolling backtest.
 
+Models: Linear Regression baseline, Decision Tree, Random Forest (Week 5) and gradient-boosted
+trees with LightGBM and XGBoost (Week 7).
+
 Procedure (IDX Best Practices §01, §09; game plan Weeks 4-5):
 1. Selection on validation only: for each training-window length and each hyperparameter
    setting, fit on the `w` months before the validation month and score the validation month.
@@ -20,6 +23,7 @@ Usage (from the repo root, after cleaning.py and geo.py):
     python src/models.py                              # all models, default feature set
     python src/models.py random_forest                # one model
     python src/models.py --features week5 random_forest
+    python src/models.py lightgbm xgboost             # Week 7 boosting models
 """
 
 import ast
@@ -28,6 +32,7 @@ import sys
 from functools import partial
 
 import joblib
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
@@ -35,6 +40,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import ParameterGrid
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeRegressor
+from xgboost import XGBRegressor
 
 import evaluation
 import features
@@ -59,6 +65,20 @@ MODELS = {
         # 200 trees: more trees only reduce variance; leaf size and features per split are tuned
         partial(RandomForestRegressor, n_estimators=200, n_jobs=-1, random_state=RANDOM_STATE),
         {"min_samples_leaf": [1, 5], "max_features": [0.33, 0.5]},
+    ),
+    # Gradient boosting (game plan Week 7). Learning rate and tree count are fixed (a small rate
+    # with many trees is the safe default); light tuning covers tree size and minimum leaf size,
+    # the two settings that control how closely each tree fits. Row and column subsampling add
+    # randomness that usually helps on noisy price data.
+    "lightgbm": (
+        partial(lgb.LGBMRegressor, n_estimators=2000, learning_rate=0.03, subsample=0.8, subsample_freq=1,
+                colsample_bytree=0.8, random_state=RANDOM_STATE, n_jobs=-1, verbose=-1),
+        {"num_leaves": [63, 255], "min_child_samples": [10, 40]},
+    ),
+    "xgboost": (
+        partial(XGBRegressor, n_estimators=2000, learning_rate=0.03, subsample=0.8, colsample_bytree=0.8,
+                tree_method="hist", random_state=RANDOM_STATE, n_jobs=-1),
+        {"max_depth": [6, 10], "min_child_weight": [1, 10]},
     ),
 }
 
