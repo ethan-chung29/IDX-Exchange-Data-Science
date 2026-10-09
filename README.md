@@ -22,6 +22,44 @@ Predict `ClosePrice` for California single-family homes from listing features (s
 - **Features:** 27 input columns → 89 model features (size, rooms, age at sale, HOA/month, location, seasonality as month sine/cosine). See `docs/leakage_audit.csv`.
 - **Leakage:** per the IDX Best Practices doc, `ListPrice`, `OriginalListPrice`, `DaysOnMarket` and post-listing / post-close dates are excluded as features (`cleaning.LEAKAGE_COLS`). They stay in the clean table only for data-quality checks.
 
+### Gradient boosting (Week 7) — best model
+
+LightGBM and XGBoost on the `week6` features, with light tuning (training window × tree size × minimum leaf size) on the 2026-03 validation month only. Both picked a 12-month window.
+
+| Test 2026-04 | R² | MdAPE | MAPE | MAE | Within 10% | Backtest MdAPE (2026-01 – 03) | Model file |
+|---|---|---|---|---|---|---|---|
+| Linear Regression | 0.827 | 11.0% | 15.1% | $205k | 46% | 10.8–11.2% | 0.1 MB |
+| Decision Tree | 0.845 | 9.3% | 13.8% | $189k | 53% | 9.0–9.5% | 0.7 MB |
+| Random Forest | 0.897 | 7.5% | 11.1% | $153k | 61% | 7.4–7.7% | 1,106 MB |
+| **LightGBM** | **0.910** | **7.15%** | 10.7% | **$145k** | 63% | 6.9–7.3% | 19 MB |
+| XGBoost | 0.908 | 7.16% | 10.7% | $146k | 63% | 6.9–7.2% | 35 MB |
+
+Both boosted models beat the Random Forest by about 0.37 MdAPE points (95% paired-bootstrap interval 0.20–0.52) and are lower in all four test months. LightGBM and XGBoost are tied; **LightGBM is the final model** because its file is half the size. The biggest gain is on luxury homes: top-quintile under-valuation drops from −7.0% (Random Forest) to −4.0%. Details in `notebooks/05_advanced_models.ipynb`.
+
+### Feature engineering (Week 6)
+
+Added flooring types and a **school-district layer** (spatial join of each home to the [CA School District Areas 2024-25](https://data.ca.gov/dataset/california-school-district-areas-2024-25) boundaries; 99.1% of homes matched). Bed/bath ratio and sq ft per bedroom were tested but made both tree models worse on validation, so they are not in the final `week6` set. District demographic shares are deliberately not used (fair-housing risk).
+
+| Test 2026-04 | Week 5 features | Week 6 features |
+|---|---|---|
+| Linear Regression | 11.23% MdAPE / R² 0.822 | **10.99% / 0.827** |
+| Decision Tree | 9.30% / 0.858 | 9.32% / 0.845 |
+| **Random Forest** | 7.60% / 0.896 | **7.52% / 0.897** (lower in all 4 test months) |
+
+Full old-vs-new table: `docs/feature_set_comparison.csv` and `notebooks/04b_feature_engineering.ipynb`.
+
+### Model comparison (Week 5)
+
+Same features, pipeline and procedure for every model: training window and hyperparameters chosen on the 2026-03 validation month, then scored once on 2026-04. All three picked a 24-month window.
+
+| Test 2026-04 | R² | MdAPE | MAPE | MAE | Within 10% | Backtest MdAPE (2026-01 – 03) |
+|---|---|---|---|---|---|---|
+| Linear Regression | 0.822 | 11.2% | 15.4% | $209k | 45% | 11.1–11.4% |
+| Decision Tree | 0.858 | 9.3% | 13.6% | $185k | 53% | 9.1–9.5% |
+| **Random Forest** | **0.896** | **7.6%** | **11.2%** | **$154k** | **61%** | **7.5–7.8%** |
+
+Random Forest lowers MdAPE by 3.6 points versus the baseline (95% paired-bootstrap interval 3.4–3.9), and is best in every price quintile and county. Luxury homes remain the hardest (MdAPE 11.3% in the top quintile). Details in `notebooks/04_model_comparison.ipynb`.
+
 ### Baseline: Linear Regression (Week 4)
 
 Trained on `log(ClosePrice)`; metrics in dollars. Window chosen on the 2026-03 validation month (24 months), then scored once on 2026-04.
@@ -49,24 +87,30 @@ The model over-values entry-level homes (median +4.9% in the lowest price quinti
 
 ```
 data/                     raw CRMLS CSVs + download script (git-ignored, never commit)
+  external/               school-district boundary shapefile (download command below)
   processed/              sfr_clean.csv (+ .parquet), the cleaned modeling table
 docs/
   data_dictionary.csv     every column: description, type, % missing
   cleaning_log.csv        rows removed / values nulled by each cleaning step
   split_summary.csv       rows and price cutoffs for each training-window length
   leakage_audit.csv       every column: used as a feature or excluded, and why
-  metrics_*.csv           validation, test and backtest metrics per model
-models/                   trained model files (git-ignored; rebuild with python src/models.py)
+  metrics_<model>__<features>.csv  validation, test and backtest metrics per model and feature set
+  feature_set_comparison.csv       old vs new feature sets (Week 6)
   figures/                charts shown above
+models/                   trained model files (git-ignored; rebuild with python src/models.py)
 notebooks/
   01_exploration.ipynb    exploratory data analysis and findings
   02_preprocessing.ipynb  cleaning rules, train/validation/test split, preprocessing pipeline
   03_baseline_model.ipynb Linear Regression baseline, backtest and error breakdown
+  04_model_comparison.ipynb  Linear Regression vs Decision Tree vs Random Forest (Week 5 features)
+  04b_feature_engineering.ipynb  new features, school-district layer, old vs new feature sets
+  05_advanced_models.ipynb   LightGBM and XGBoost with light tuning, compared with every earlier model
 src/
   cleaning.py             cleaning pipeline (thresholds in RULES)
   preprocessing.py        time-based train/validation/test split + train-only ClosePrice percentile cut
-  features.py             feature list, leakage audit and scikit-learn preprocessing pipeline
-  models.py               window selection on validation, test, rolling backtest (any sklearn model)
+  features.py             feature sets (week5 / week6 ...), leakage audit, scikit-learn preprocessing pipeline
+  geo.py                  school-district spatial join (CA School District Areas 2024-25)
+  models.py               model registry; window + hyperparameter selection on validation, test, rolling backtest
   evaluation.py           R², MAPE, MdAPE, MAE, RMSE and breakdowns by price band / county
   make_figures.py         regenerates docs/figures/
 ```
@@ -76,12 +120,18 @@ src/
 Put the monthly `CRMLSSold*.csv` files in `data/`, then from the repo root:
 
 ```bash
+brew install libomp           # macOS only: OpenMP runtime needed by LightGBM and XGBoost
 pip install -r requirements.txt
 python src/cleaning.py        # writes data/processed/sfr_clean.csv (+ .parquet) and docs/cleaning_log.csv
 python src/make_figures.py    # regenerates docs/figures/
 python src/preprocessing.py --train-months 12   # writes data/processed/{train,val,test}.csv and docs/split_summary.csv
+mkdir -p data/external && curl -L -o data/external/ca_school_district_areas_2024_25.zip \
+  "https://gis.data.ca.gov/api/download/v1/items/b0e3b936426a47ce9d9a2e77e2bb86cc/shapefile?layers=0"
+python src/geo.py             # school-district join -> data/processed/school_districts.parquet
 python src/features.py        # writes docs/leakage_audit.csv
-python src/models.py          # trains the Linear Regression baseline, writes docs/metrics_*.csv and models/
+python src/models.py          # trains all five models on the week6 features (~35 min), writes docs/metrics_*.csv and models/
+python src/models.py lightgbm xgboost                 # only the Week 7 boosting models (~25 min)
+python src/models.py --features week5 random_forest   # a single model / another feature set
 ```
 
 Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks locally to see their charts and tables.
@@ -92,5 +142,8 @@ Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks loc
 - **Preprocessing pipeline (done):** median imputation + missing-value flags, one-hot for county/levels, cross-fitted target encoding for ZIP/city/MLS area/school district, scaling; all fit on training data only (`src/features.py`).
 - **Training window:** picked per model on the **validation** month (24 months for the baseline); test is used once at the end.
 - **Baseline (done):** Linear Regression, see results above.
-- **Week 5:** Decision Tree and Random Forest with the same pipeline, compared side by side with the baseline.
+- **Week 5 (done):** Decision Tree and Random Forest, see the comparison above.
+- **Week 6 (done):** flooring types + school-district layer, see above.
+- **Week 7 (done):** LightGBM and XGBoost with light tuning, see above. LightGBM is the final model.
+- **Week 8:** full evaluation of the final model (`06_evaluation.ipynb`, `docs/metrics_summary.csv`).
 - Confirm with the team how coordinates were imputed in the `_filled` files.

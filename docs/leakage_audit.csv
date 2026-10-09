@@ -1,5 +1,5 @@
 column,verdict,reason
-Flooring,excluded,comma-separated list; planned as multi-hot features in Week 6
+Flooring,feature,flooring types as 0/1 columns (vocabulary learned on training data)
 ViewYN,feature,physical or location fact known before any sale
 WaterfrontYN,feature,physical or location fact known before any sale
 BasementYN,feature,physical or location fact known before any sale
@@ -48,3 +48,10 @@ property_age,feature,close year minus YearBuilt; at prediction time: valuation y
 month_sin,feature,"month of sale only (at prediction time: the valuation month), no price information"
 month_cos,feature,"month of sale only (at prediction time: the valuation month), no price information"
 hoa_monthly,feature,AssociationFee divided by its payment frequency; HOA dues are known before a sale
+bed_bath_ratio,excluded,tested in Week 6; worsened both tree models on validation (docs/feature_set_comparison.csv)
+sqft_per_bedroom,excluded,tested in Week 6; worsened both tree models on validation (docs/feature_set_comparison.csv)
+school_district_k8,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); target-encoded
+school_district_hs,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); target-encoded
+district_type,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); Unified vs Elementary + High
+district_k8_enrollment,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); district size (demographic shares deliberately excluded)
+district_k8_assistance,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); state accountability status (school performance)

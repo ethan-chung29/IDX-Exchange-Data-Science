@@ -36,9 +36,9 @@ def metrics_by_group(y_true, y_pred, groups, min_n=1):
     """
     frame = pd.DataFrame({"y": np.asarray(y_true, dtype=float), "p": np.asarray(y_pred, dtype=float),
                           "g": np.asarray(groups)})
-    rows = [{"group": g, **regression_metrics(d["y"], d["p"])} for g, d in frame.groupby("g", observed=True)]
-    out = pd.DataFrame(rows).drop(columns="R2")
-    return out[out["n"] >= min_n].reset_index(drop=True)
+    rows = [{"group": g, **regression_metrics(d["y"], d["p"])}
+            for g, d in frame.groupby("g", observed=True) if len(d) >= max(min_n, 2)]
+    return pd.DataFrame(rows).drop(columns="R2")
 
 
 def price_bands(y_true, q=5):
@@ -46,3 +46,24 @@ def price_bands(y_true, q=5):
     bands = pd.qcut(np.asarray(y_true, dtype=float), q=q)
     labels = [f"Q{i + 1} (${b.left / 1e3:,.0f}k–${b.right / 1e3:,.0f}k)" for i, b in enumerate(bands.categories)]
     return bands.rename_categories(labels)
+
+
+def paired_bootstrap_mdape(y_true, pred_a, pred_b, n_boot=2000, seed=42):
+    """How much lower model B's MdAPE is than model A's, with a 95% bootstrap interval.
+
+    Both models are scored on the same resampled homes each round, so the interval reflects
+    the uncertainty in the difference itself (IDX Best Practices §09: the improvement over the
+    baseline must be larger than noise). If the interval excludes 0, the gain is not noise.
+    """
+    y, a, b = (np.asarray(v, dtype=float) for v in (y_true, pred_a, pred_b))
+    ape_a, ape_b = np.abs(a - y) / y, np.abs(b - y) / y
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(y), size=(n_boot, len(y)))
+    diffs = 100 * (np.median(ape_a[idx], axis=1) - np.median(ape_b[idx], axis=1))
+    return {
+        "mdape_a": float(100 * np.median(ape_a)),
+        "mdape_b": float(100 * np.median(ape_b)),
+        "improvement_pts": float(100 * (np.median(ape_a) - np.median(ape_b))),
+        "ci_low": float(np.percentile(diffs, 2.5)),
+        "ci_high": float(np.percentile(diffs, 97.5)),
+    }
