@@ -125,6 +125,7 @@ docs/
   prediction_intervals.csv  final model's 80% / 90% price ranges per predicted-price band, with test coverage
   figures/                charts shown above
 models/                   trained model files (git-ignored; rebuild with python src/models.py)
+app.py                    Streamlit app: value one home with the final model (Week 9)
 notebooks/
   01_exploration.ipynb    exploratory data analysis and findings
   02_preprocessing.ipynb  cleaning rules, train/validation/test split, preprocessing pipeline
@@ -141,6 +142,7 @@ src/
   models.py               model registry; window + hyperparameter selection on validation, test, rolling backtest
   evaluation.py           R², MAPE, MdAPE, MAE, RMSE and breakdowns by price band / county
   evaluate_final.py       picks the final model on validation, writes metrics_summary.csv, intervals and figures
+  predict.py              values one home: ZIP/district fill-in, schema check, warnings, price range (used by app.py)
   make_figures.py         regenerates docs/figures/
 ```
 
@@ -166,6 +168,20 @@ python src/models.py --features week5 random_forest   # a single model / another
 ```
 
 Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks locally to see their charts and tables.
+
+## Run the app (Week 9)
+
+A local Streamlit app values one home with the final LightGBM model. Enter a ZIP code and the home's details (anything optional can stay blank); it fills in the city, county and coordinates from the ZIP code, looks up the school districts from the coordinates, and shows the estimate with its 80% and 90% likely ranges plus a map.
+
+```bash
+# once: data, school districts, final model and intervals (see How to run)
+python src/cleaning.py && python src/geo.py && python src/models.py --tuned && python src/evaluate_final.py
+streamlit run app.py          # opens http://localhost:8501
+```
+
+- Same preprocessing and model as the evaluation: given the same inputs, the app's prices match the trained pipeline exactly (checked on 3,000 test homes). Filling blank fields from the ZIP code does not change accuracy (test MdAPE 7.08% vs 7.10%, difference within noise).
+- The feature schema is checked against the model's before every prediction, and the app warns when an input is outside the training data (living area, unknown ZIP, coordinates outside California, an estimate outside the training price range).
+- Runs locally only: the trained model (39 MB) and data are git-ignored.
 
 ## Data snapshot
 
@@ -193,5 +209,6 @@ Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks loc
 - **Week 6 (done):** flooring types + school-district layer, see above.
 - **Week 7 (done):** LightGBM and XGBoost with light tuning, see above.
 - **Week 8 (done):** wider tuning, final evaluation and prediction intervals; LightGBM is the final model.
-- **Week 9 (optional):** Streamlit app: saved LightGBM model + school-district lookup + 80% price range.
+- **Week 9 (done):** local Streamlit app (`app.py`), see "Run the app".
+- **Week 10–12:** final README pass, slides, final presentation.
 - Confirm with the team how coordinates were imputed in the `_filled` files.

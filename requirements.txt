@@ -11,4 +11,5 @@ pyogrio==0.13.0
 pyproj==3.7.2
 scikit-learn==1.9.1
 shapely==2.2.0
+streamlit==1.65.0
 xgboost==3.2.0
