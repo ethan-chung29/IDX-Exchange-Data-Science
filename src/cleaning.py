@@ -44,6 +44,12 @@ RULES = {
     "max_garage_spaces": 20,
     "max_parking_total": 50,
     "max_days_on_market": 3_650,
+    # Same address re-recorded under a new ListingKey with the same price within this many days
+    # is one transaction (corrected close date); real resales of a home differ in price.
+    "same_sale_max_days": 30,
+    # Less living area than this per bedroom / per bathroom is physically impossible
+    "min_sqft_per_bedroom": 150,
+    "min_sqft_per_bathroom": 100,
     # Rough California bounding box
     "lat_range": (32.3, 42.1),
     "lon_range": (-124.5, -114.0),
@@ -129,12 +135,27 @@ def clean(raw, rules=RULES):
     df = log.drop(df, ~((df["PropertyType"] == "Residential") & (df["PropertySubType"] == "SingleFamilyResidence")),
                   "not Residential / SingleFamilyResidence")
     df = log.drop(df, df["StateOrProvince"] != "CA", "state not CA")
+    # Primer: price analysis uses closed sales only (all CRMLSSold rows should already be Closed)
+    df = log.drop(df, df["MlsStatus"] != "Closed", "status not Closed")
 
     # 2. Duplicates: same listing re-recorded (usually a corrected CloseDate).
     #    Keep the most recently updated record.
     # na_position="first" so a record with no update date never counts as the latest
     df = df.sort_values(["ListingKey", "ContractStatusChangeDate", "CloseDate", "source_file"], na_position="first")
     df = log.drop(df, df.duplicated("ListingKey", keep="last"), "duplicate ListingKey (kept latest update)")
+
+    # Same transaction under two ListingKeys (Best Practices: same address + close date). Two
+    # records at one address are one sale if they close the same day, or within
+    # `same_sale_max_days` at the same price. The address is used only here and then dropped.
+    addr = (df["UnparsedAddress"].astype("string").str.upper().str.replace(r"[^A-Z0-9]", "", regex=True)
+            + "|" + df["PostalCode"].astype("string"))
+    df = df.assign(_addr=addr).sort_values(["_addr", "CloseDate", "ContractStatusChangeDate", "source_file"],
+                                           na_position="first")
+    nxt = df.groupby("_addr", sort=False)[["CloseDate", "ClosePrice"]].shift(-1)
+    gap = (nxt["CloseDate"] - df["CloseDate"]).dt.days
+    same_sale = df["_addr"].notna() & ((gap == 0) | ((gap <= rules["same_sale_max_days"]) & (nxt["ClosePrice"] == df["ClosePrice"])))
+    df = log.drop(df, same_sale, "same address re-recorded as a new listing (same close date, or same price within "
+                                 f"{rules['same_sale_max_days']} days; kept later record)").drop(columns="_addr")
 
     # Logically impossible timelines: a sale cannot close before it was listed or went under contract.
     # (An offer dated before the listing date is kept: pre-listing / off-MLS offers do happen.)
@@ -155,6 +176,11 @@ def clean(raw, rules=RULES):
     ppsf = df["ClosePrice"] / df["LivingArea"]
     lo, hi = rules["price_per_sqft"]
     df = log.drop(df, (ppsf < lo) | (ppsf > hi), f"price per sqft outside [${lo}, ${hi:,}]")
+    # Best Practices: bedroom / bathroom counts inconsistent with living area
+    per_bed = df["LivingArea"] / df["BedroomsTotal"].where(df["BedroomsTotal"] > 0)
+    per_bath = df["LivingArea"] / df["BathroomsTotalInteger"].where(df["BathroomsTotalInteger"] > 0)
+    df = log.drop(df, (per_bed < rules["min_sqft_per_bedroom"]) | (per_bath < rules["min_sqft_per_bathroom"]),
+                  f"under {rules['min_sqft_per_bedroom']} sq ft per bedroom or {rules['min_sqft_per_bathroom']} per bathroom")
 
     df = df.copy()
 
