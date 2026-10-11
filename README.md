@@ -1,30 +1,141 @@
-# IDX-Exchange-Data-Science
-Automated Valuation Model (AVM) predicting California residential close prices from CRMLS sold data — IDX Exchange Data Science internship, Fall 2026.
+# California Home Price AVM
 
-## Goal
+An automated valuation model (AVM) that predicts the sale price (`ClosePrice`) of California single-family homes from their listing details, built on 28 months of closed CRMLS sales. IDX Exchange Data Science internship, Fall 2026 — Ethan Chung.
 
-Predict `ClosePrice` for California single-family homes from listing features (size, beds/baths, age, lot, location, amenities), using 28 months of closed CRMLS sales (Jan 2024 – Apr 2026). The model targets `log(ClosePrice)`.
+## Summary
 
-## Results so far
+- **Final model:** LightGBM (gradient-boosted trees) on 33 input columns: size, rooms, age, lot, amenities, location, school districts, flooring and season.
+- **Accuracy on the held-out test month (April 2026, 12,328 homes):** median absolute error **6.96%** of the sale price, R² **0.912**; 64% of homes valued within ±10%. The Linear Regression baseline scores 10.99% / 0.827 on the same homes.
+- **Stable over time:** 6.8–7.0% in each of four test months (January–April 2026).
+- **Honest ranges:** every estimate comes with 80% and 90% likely ranges that held up on the test month (78–81% and 88–90% coverage).
+- **App:** `streamlit run app.py` values any home from a ZIP code and its details.
 
-| Stage | Rows |
+![MdAPE by test month for every tuned model](docs/figures/model_mdape_by_month.png)
+
+## Contents
+
+[Pipeline](#pipeline) · [Data](#data) · [Cleaning](#cleaning) · [Split and validation](#split-and-validation) · [Features](#features) · [Models and tuning](#models-and-tuning) · [Results](#results) · [Prediction app](#prediction-app) · [Reproduce](#reproduce) · [Assumptions](#assumptions) · [Limitations](#limitations) · [Next steps](#next-steps) · [Repo layout](#repo-layout) · [Project timeline](#project-timeline)
+
+## Pipeline
+
+```mermaid
+flowchart LR
+    A[28 monthly CRMLS<br/>sold CSVs] --> B[cleaning.py<br/>filter, dedupe, fix units]
+    S[CA school-district<br/>boundaries] --> G[geo.py<br/>spatial join]
+    B --> C[preprocessing.py<br/>time split +<br/>train-only price cut]
+    G --> F
+    C --> F[features.py<br/>scikit-learn pipeline,<br/>fit on train only]
+    F --> M[models.py<br/>tune on validation month,<br/>test once, backtest]
+    M --> E[evaluate_final.py<br/>final model, metrics,<br/>price ranges]
+    E --> P[predict.py + app.py<br/>Streamlit app]
+```
+
+## Data
+
+- **Source:** CRMLS closed sales from the IDX Exchange data feed, 28 monthly files (`CRMLSSold202401` – `CRMLSSold202604`) downloaded **2026-09-29** with `data/crmls_sold.py` (API key read from the `IDX_PROXY_KEY` environment variable). Field definitions follow the Trestle Property Metadata. Raw data is git-ignored and never committed.
+- **Population:** `PropertyType = Residential` and `PropertySubType = SingleFamilyResidence` in California, closed January 2024 – April 2026.
+- **External data:** [CA School District Areas 2024-25](https://data.ca.gov/dataset/california-school-district-areas-2024-25) boundaries (data.ca.gov), downloaded 2026-10-08.
+- **Column reference:** `docs/data_dictionary.csv` (description, type and % missing for every column).
+
+Key findings from exploration (`notebooks/01_exploration.ipynb`):
+
+| | |
 |---|---|
-| Raw monthly files (all property types) | 615,707 |
-| Residential single-family homes | 309,735 |
-| After cleaning | **308,525** (99.6% kept) |
-| Train (12 months, 2025-03 – 2026-02) / validation (2026-03) / test (2026-04), after outlier cut | 127,862 / 11,403 / 12,331 |
+| ![Distribution of close prices](docs/figures/price_distribution.png) | ![Median close price by month](docs/figures/median_price_by_month.png) |
+| ![Median close price by county](docs/figures/median_price_by_county.png) | ![Distributions of living area, bedrooms, bathrooms and lot size](docs/figures/feature_distributions.png) |
 
-- **Impossible timelines:** 238 sales closed before their listing or purchase-contract date and are removed (`docs/cleaning_log.csv` logs count and % for every step).
-- **Duplicates:** 580 listings appear 2–4 times across monthly files, usually the same sale re-recorded with a corrected close date. The most recently updated record is kept.
-- **Price typos:** 22 of the 31 sales above $50M are typos (e.g. $970M closing on a $975k list price). A close/list ratio band of [0.5, 2] removes them.
-- **Lot units:** 337 lot sizes under 10 "sq ft" (mostly San Diego and Riverside) are acres typed into the square-feet field and are converted; 46 ambiguous lots under 500 sq ft are set to missing.
-- **Coordinates:** `latfilled` / `lonfilled` in the `_filled` files are True/False flags meaning the coordinate was imputed. They are kept as `coords_imputed`.
-- **Features:** 33 input columns → 119 model features in the final model (size, rooms, age at sale, HOA/month, location, school districts, flooring, seasonality as month sine/cosine). See `docs/leakage_audit.csv`.
-- **Leakage:** per the IDX Best Practices doc, `ListPrice`, `OriginalListPrice`, `DaysOnMarket` and post-listing / post-close dates are excluded as features (`cleaning.LEAKAGE_COLS`). They stay in the clean table only for data-quality checks.
+- Prices are strongly right-skewed (median $892k, a long tail into the tens of millions), so models predict `log(ClosePrice)` and convert back to dollars.
+- The market moved little over the period (monthly median $799k–$935k), with a spring peak each year: seasonality matters more than trend.
+- Location dominates price: the median varies more than 6× between counties with 1,000+ sales (Lake vs San Mateo).
 
-### Final model and evaluation (Week 8)
+## Cleaning
 
-Every model was retuned with a wider search on the 2026-03 validation month (`python src/models.py --tuned`), and all of them are scored on the same 12,328 homes of the 2026-04 test month. **Final model: LightGBM**, chosen on validation MdAPE alone (6.78%, essentially tied with XGBoost at 6.79%). It uses a 24-month window, 511 leaves and an absolute-error objective, which targets the median error directly.
+`src/cleaning.py`; every threshold is in `RULES`, and every step's count and percentage is logged in `docs/cleaning_log.csv`. Reasoning: `notebooks/02_preprocessing.ipynb`.
+
+| Step | Rows removed | Rows left |
+|---|---|---|
+| Raw monthly files (all property types) | | 615,707 |
+| Not Residential / single-family | 305,972 | 309,735 |
+| State not CA | 22 | 309,713 |
+| Duplicate `ListingKey` (same sale re-recorded; latest update kept) | 264 | 309,449 |
+| Closed before its listing date / purchase-contract date | 44 + 194 | 309,211 |
+| Close price missing or under $10,000 | 9 | 309,202 |
+| Close/list price ratio outside [0.5, 2] or no list price (typos, e.g. $970M on a $975k listing) | 225 | 308,977 |
+| Living area missing or outside 300–20,000 sq ft | 327 | 308,650 |
+| Price per sq ft outside $50–$5,000 | 125 | **308,525** (99.6% of single-family rows) |
+
+Values that are impossible but don't invalidate the sale are set to missing instead of dropping the row (the model imputes them): year built before 1850 or after the sale (7), beds or baths of 0 or over 20 (195), garage over 20 or parking over 50 spaces (277), coordinates outside California (62). Lot sizes are repaired: 21 filled from acres, 337 values under 10 "sq ft" converted from acres, 396 zero, absurd or ambiguous lots set to missing.
+
+![Rows removed by each cleaning step](docs/figures/cleaning_steps.png)
+
+## Split and validation
+
+Following the IDX Best Practices doc, everything is split by time, never shuffled (`src/preprocessing.py`):
+
+- **Test:** the latest month, **2026-04**. Scored once, after every choice was made.
+- **Validation:** the month before, **2026-03**. Used for every choice: training-window length, hyperparameters, feature sets and the final model.
+- **Training window:** the X months immediately before validation, with X tried at 3, 6, 12 and 24 months (`docs/split_summary.csv`). For the test score, the chosen setup is refit on the X months right before the test month.
+- **Outlier cut:** `ClosePrice` below the 0.5th or above the 99.5th percentile of the **training** window is dropped. The same frozen cutoffs (e.g. $200,000 – $8,078,560 for the final model) are applied to validation and test.
+- **Same homes for every model:** each month is scored on one fixed set of homes (cutoffs of the 24 months before it), so windows and models are compared on identical homes.
+- **Rolling backtest:** the final setup is refit and rescored with 2026-03, 2026-02 and 2026-01 as the test month.
+- **Significance:** differences between models are checked with a paired bootstrap of the test homes (2,000 resamples, 95% interval).
+
+**Metrics** (all in dollars, `src/evaluation.py`):
+
+| Metric | Meaning |
+|---|---|
+| **MdAPE** (headline) | Median absolute percentage error: half of homes are valued closer than this. Robust to a few extreme misses. |
+| MAPE | Mean absolute percentage error; pulled up by large misses. |
+| MAE / RMSE | Mean absolute / root-mean-square error in dollars; dominated by expensive homes. |
+| R² | Share of the variance in sale prices explained. |
+| Within 10% | Share of homes valued within ±10% of the sale price. |
+| Median signed error | Direction of bias: > 0 means the typical home is over-valued. |
+
+## Features
+
+33 input columns become 119 model features in the final pipeline (`src/features.py`). Every step that learns from data sits inside one scikit-learn `ColumnTransformer` fit on the training window only.
+
+| Group | Columns | Treatment |
+|---|---|---|
+| Size | `LivingArea`, `LotSizeSquareFeet` | median imputation + missing flag, log, scaled |
+| Rooms and structure | beds, baths, main-level beds, stories, garage and parking spaces, `Levels` | median imputation + missing flag; `Levels` one-hot |
+| Age | `property_age` = sale year − year built | median imputation + missing flag |
+| Amenities | view, private pool, fireplace, attached garage, basement, waterfront, new construction; `Flooring` | most-frequent imputation + missing flag; flooring split into one 0/1 column per type (types with 500+ training sales) |
+| HOA | `hoa_monthly` = fee ÷ payment frequency | median imputation + missing flag |
+| Location | latitude, longitude, county | county one-hot; ZIP, city, MLS area and high-school district **target-encoded** with 5-fold cross-fitting, so a home's own price never feeds its own encoding |
+| School districts | K-8 and high-school district (spatial join, 99.1% of homes matched), district type, enrollment, state assistance status | districts target-encoded; others one-hot / log |
+| Season | `month_sin`, `month_cos` of the sale month | — |
+
+**How features were chosen** (each tested on the validation month; `docs/feature_set_comparison*.csv`):
+
+| Feature idea | Result on validation | Decision |
+|---|---|---|
+| School-district layer + flooring (Week 6) | lowered MdAPE for all three models of the time (Random Forest 7.50% → 7.40%) | **kept** |
+| Bed/bath ratio, sq ft per bedroom (Week 6) | worse for both tree models | dropped |
+| Market trend (months since 2024-01) (Week 8) | worse for every model | dropped |
+| Price level of the 10 nearest training sales (Week 8) | Linear Regression 10.82% → 9.32%, but no gain for LightGBM / XGBoost | dropped (the final model already learns location) |
+
+**Excluded on purpose** (`docs/leakage_audit.csv` lists every column with its reason): `ListPrice`, `OriginalListPrice`, `DaysOnMarket` and the listing / contract / close dates leak the answer or are only known once the home is listed. Agent and office names, addresses and other personal data are dropped. District race, ethnicity and income shares are not used: a valuation model that learns from neighborhood demographics creates a fair-housing risk. Columns over 60% missing (subdivision, school names, builder) are dropped.
+
+## Models and tuning
+
+Five models go through the identical procedure in `src/models.py`, all predicting `log(ClosePrice)`, with seeds fixed (`random_state=42`). Each is tuned on the 2026-03 validation month over training window × the grid below, keeping the lowest validation MdAPE.
+
+| Model | Search (Week 8, `python src/models.py --tuned`) | Chosen |
+|---|---|---|
+| Linear Regression (baseline) | window only | 24 months |
+| Decision Tree | max depth 12 / 16 / 20 × min leaf 2 / 5 / 10 | 24 months, depth 16, leaf 5 |
+| Random Forest (200 trees) | min leaf 1 / 2 × features per split 20% / 33% | 24 months, leaf 1, 33% |
+| **LightGBM** (2,000 trees, learning rate 0.03, 80% row and column sampling) | leaves 255 / 511 / 1023 × min leaf 5 / 10 × squared vs absolute error | **24 months, 511 leaves, min leaf 10, absolute error** |
+| XGBoost (2,000 trees, learning rate 0.03, 80% sampling) | depth 10 / 12 / 14 × min child weight 1 / 10 × squared vs absolute error | 12 months, depth 10, weight 10, absolute error |
+
+In the earlier searches (`docs/metrics_*__week6.csv`) every model's best result used a 12- or 24-month window, and 12 months beat both 3 and 6 for every model and setting, so the Week 8 search used 12 and 24 only. The absolute-error objective, which on log prices targets the median percentage error directly, was the main gain for the boosted models.
+
+**Final model choice:** LightGBM had the lowest validation MdAPE (6.78%, essentially tied with XGBoost at 6.79%). The test month played no part in the choice.
+
+## Results
+
+All five tuned models on the same 12,328 homes of the April 2026 test month (`docs/metrics_summary.csv`, `notebooks/06_evaluation.ipynb`):
 
 | Test 2026-04 | R² | MdAPE | MAPE | MAE | Within 10% | Backtest MdAPE (2026-01 – 03) | Model file |
 |---|---|---|---|---|---|---|---|
@@ -34,181 +145,153 @@ Every model was retuned with a wider search on the 2026-03 validation month (`py
 | **LightGBM (final)** | **0.912** | **6.96%** | **10.5%** | **$142k** | **64%** | **6.8–7.0%** | 39 MB |
 | XGBoost | 0.905 | 7.15% | 10.8% | $147k | 63% | 6.8–7.2% | 17 MB |
 
-- LightGBM beats the baseline by 4.0 MdAPE points (95% paired-bootstrap interval 3.8–4.3) and the Random Forest by 0.56 (0.42–0.69). It is the lowest of every model in all four test months.
-- 38% of test homes are valued within ±5%, 64% within ±10%, 87% within ±20%.
-- Most accurate for $575k–$1.1M homes (MdAPE 5.3–6.0%). Luxury homes above $1.67M remain the weakest segment (MdAPE 10.2%, under-valued by 5.0%, vs 15.7% and −9.6% for the baseline).
-- **Prediction intervals:** 80% / 90% ranges per band of predicted price, built from validation-month errors, contain 78–81% / 88–90% of test homes in every band (`docs/prediction_intervals.csv`).
-- Two Week 8 feature ideas were tested on validation and not adopted: a market-trend feature (worse for every model) and the price level of the 10 nearest sales (cut Linear Regression's MdAPE from 10.8% to 9.3%, but did not help the boosted models). See `docs/feature_set_comparison_week8.csv`.
-
-Full breakdown by price band, county, size, age and the largest misses: `notebooks/06_evaluation.ipynb`; every number in one table: `docs/metrics_summary.csv`.
-
-![MdAPE by test month for every tuned model](docs/figures/model_mdape_by_month.png)
+- **More than noise:** LightGBM beats the baseline by 4.0 MdAPE points (95% paired-bootstrap interval 3.8–4.3) and the Random Forest by 0.56 (0.42–0.69). It has the lowest MdAPE of every model in all four test months.
+- **Typical accuracy:** 38% of homes within ±5%, 64% within ±10%, 87% within ±20%.
+- **By price:** most accurate for $575k–$1.1M homes (MdAPE 5.3–6.0%). Entry-level homes are over-valued by 2.4%; luxury homes above $1.67M are under-valued by 5.0% (MdAPE 10.2%), the weakest segment but far better than the baseline (15.7%, −9.6%).
+- **By region:** LightGBM or XGBoost is the best model in every county with 200+ test homes; easiest are Riverside and San Bernardino (5.6–5.7%), hardest is Alameda (9.8%).
+- **By home:** error grows with age (4.5% for homes 0–5 years old, 10.5% for homes over 80) and is highest for the largest fifth of homes (8.3%).
+- **What drives it:** ZIP code (31% of the model's gain), living area (10%), city (9%), then lot size, age and coordinates.
 
 ![Final model errors by price quintile](docs/figures/final_model_by_price_band.png)
 
-### Gradient boosting (Week 7)
+**Prediction ranges** (`docs/prediction_intervals.csv`): for each fifth of predicted prices, the 80% and 90% ranges are the middle 80% / 90% of the final model's actual ÷ predicted ratios on the validation month. On the test month they contained 78–81% and 88–90% of homes in every band. They are wider upward for expensive homes (up to +26% at 80%).
 
-LightGBM and XGBoost on the `week6` features, with light tuning (training window × tree size × minimum leaf size) on the 2026-03 validation month only. Both picked a 12-month window.
+## Prediction app
 
-| Test 2026-04 | R² | MdAPE | MAPE | MAE | Within 10% | Backtest MdAPE (2026-01 – 03) | Model file |
-|---|---|---|---|---|---|---|---|
-| Linear Regression | 0.827 | 11.0% | 15.1% | $205k | 46% | 10.8–11.2% | 0.1 MB |
-| Decision Tree | 0.845 | 9.3% | 13.8% | $189k | 53% | 9.0–9.5% | 0.7 MB |
-| Random Forest | 0.897 | 7.5% | 11.1% | $153k | 61% | 7.4–7.7% | 1,106 MB |
-| **LightGBM** | **0.910** | **7.15%** | 10.7% | **$145k** | 63% | 6.9–7.3% | 19 MB |
-| XGBoost | 0.908 | 7.16% | 10.7% | $146k | 63% | 6.9–7.2% | 35 MB |
+A local Streamlit app (`app.py`, logic in `src/predict.py`) values one home:
 
-Both boosted models beat the Random Forest by about 0.37 MdAPE points (95% paired-bootstrap interval 0.20–0.52) and are lower in all four test months. LightGBM and XGBoost were tied; the wider Week 8 search above improved LightGBM further. The biggest gain is on luxury homes: top-quintile under-valuation drops from −7.0% (Random Forest) to −4.0%. Details in `notebooks/05_advanced_models.ipynb`.
-
-### Feature engineering (Week 6)
-
-Added flooring types and a **school-district layer** (spatial join of each home to the [CA School District Areas 2024-25](https://data.ca.gov/dataset/california-school-district-areas-2024-25) boundaries; 99.1% of homes matched). Bed/bath ratio and sq ft per bedroom were tested but made both tree models worse on validation, so they are not in the final `week6` set. District demographic shares are deliberately not used (fair-housing risk).
-
-| Test 2026-04 | Week 5 features | Week 6 features |
-|---|---|---|
-| Linear Regression | 11.23% MdAPE / R² 0.822 | **10.99% / 0.827** |
-| Decision Tree | 9.30% / 0.858 | 9.32% / 0.845 |
-| **Random Forest** | 7.60% / 0.896 | **7.52% / 0.897** (lower in all 4 test months) |
-
-Full old-vs-new table: `docs/feature_set_comparison.csv` and `notebooks/04b_feature_engineering.ipynb`.
-
-### Model comparison (Week 5)
-
-Same features, pipeline and procedure for every model: training window and hyperparameters chosen on the 2026-03 validation month, then scored once on 2026-04. All three picked a 24-month window.
-
-| Test 2026-04 | R² | MdAPE | MAPE | MAE | Within 10% | Backtest MdAPE (2026-01 – 03) |
-|---|---|---|---|---|---|---|
-| Linear Regression | 0.822 | 11.2% | 15.4% | $209k | 45% | 11.1–11.4% |
-| Decision Tree | 0.858 | 9.3% | 13.6% | $185k | 53% | 9.1–9.5% |
-| **Random Forest** | **0.896** | **7.6%** | **11.2%** | **$154k** | **61%** | **7.5–7.8%** |
-
-Random Forest lowers MdAPE by 3.6 points versus the baseline (95% paired-bootstrap interval 3.4–3.9), and is best in every price quintile and county. Luxury homes remain the hardest (MdAPE 11.3% in the top quintile). Details in `notebooks/04_model_comparison.ipynb`.
-
-### Baseline: Linear Regression (Week 4)
-
-Trained on `log(ClosePrice)`; metrics in dollars. Window chosen on the 2026-03 validation month (24 months), then scored once on 2026-04.
-
-| Test month | R² | MdAPE | MAPE | MAE | Within 10% |
-|---|---|---|---|---|---|
-| **2026-04 (test)** | **0.822** | **11.2%** | 15.4% | $209k | 45% |
-| 2026-03 (backtest) | 0.817 | 11.1% | 15.1% | $201k | 46% |
-| 2026-02 (backtest) | 0.803 | 11.4% | 15.4% | $208k | 45% |
-| 2026-01 (backtest) | 0.788 | 11.3% | 15.7% | $200k | 45% |
-
-The model over-values entry-level homes (median +4.9% in the lowest price quintile) and under-values luxury homes (−10.6%, MdAPE 15.9% in the top quintile). Full breakdown in `notebooks/03_baseline_model.ipynb` and `docs/metrics_baseline_linear_regression.csv`.
-
-![Rows removed by each cleaning step](docs/figures/cleaning_steps.png)
-
-![Distribution of close prices](docs/figures/price_distribution.png)
-
-![Median close price by month](docs/figures/median_price_by_month.png)
-
-![Median close price by county](docs/figures/median_price_by_county.png)
-
-![Distributions of living area, bedrooms, bathrooms and lot size](docs/figures/feature_distributions.png)
-
-## Repo layout
-
-```
-data/                     raw CRMLS CSVs + download script (git-ignored, never commit)
-  external/               school-district boundary shapefile (download command below)
-  processed/              sfr_clean.csv (+ .parquet), the cleaned modeling table
-docs/
-  data_dictionary.csv     every column: description, type, % missing
-  cleaning_log.csv        rows removed / values nulled by each cleaning step
-  split_summary.csv       rows and price cutoffs for each training-window length
-  leakage_audit.csv       every column: used as a feature or excluded, and why
-  metrics_<model>__<features>.csv  validation, test and backtest metrics per model and feature set
-  feature_set_comparison.csv       old vs new feature sets (Week 6)
-  feature_set_comparison_week8.csv market-trend and nearest-sales features, validation only (Week 8)
-  metrics_summary.csv     every tuned model: validation, test and backtest, by price band and county (Week 8)
-  prediction_intervals.csv  final model's 80% / 90% price ranges per predicted-price band, with test coverage
-  figures/                charts shown above
-models/                   trained model files (git-ignored; rebuild with python src/models.py)
-app.py                    Streamlit app: value one home with the final model (Week 9)
-notebooks/
-  01_exploration.ipynb    exploratory data analysis and findings
-  02_preprocessing.ipynb  cleaning rules, train/validation/test split, preprocessing pipeline
-  03_baseline_model.ipynb Linear Regression baseline, backtest and error breakdown
-  04_model_comparison.ipynb  Linear Regression vs Decision Tree vs Random Forest (Week 5 features)
-  04b_feature_engineering.ipynb  new features, school-district layer, old vs new feature sets
-  05_advanced_models.ipynb   LightGBM and XGBoost with light tuning, compared with every earlier model
-  06_evaluation.ipynb     final evaluation: model choice, price bands, regions, segments, largest misses, intervals
-src/
-  cleaning.py             cleaning pipeline (thresholds in RULES)
-  preprocessing.py        time-based train/validation/test split + train-only ClosePrice percentile cut
-  features.py             feature sets (week5 / week6 ...), leakage audit, scikit-learn preprocessing pipeline
-  geo.py                  school-district spatial join (CA School District Areas 2024-25)
-  models.py               model registry; window + hyperparameter selection on validation, test, rolling backtest
-  evaluation.py           R², MAPE, MdAPE, MAE, RMSE and breakdowns by price band / county
-  evaluate_final.py       picks the final model on validation, writes metrics_summary.csv, intervals and figures
-  predict.py              values one home: ZIP/district fill-in, schema check, warnings, price range (used by app.py)
-  make_figures.py         regenerates docs/figures/
-```
-
-## How to run
-
-Put the monthly `CRMLSSold*.csv` files in `data/`, then from the repo root:
+- **Inputs:** ZIP code plus the home's details; anything optional can stay blank and is imputed exactly as in training.
+- **Auto-filled:** city, county, MLS area and coordinates from the ZIP code (its most common values in past sales), school districts from the coordinates, age at the valuation date.
+- **Output:** estimated value, 80% and 90% likely ranges, school districts and a map.
+- **Safeguards:** the input columns are asserted to match the model's training schema before every prediction; warnings appear for a living area outside the training range, a ZIP with fewer than 5 past sales, coordinates outside California, or an estimate outside the training price range.
+- **Checked:** given the same inputs, the app's prices match the trained pipeline exactly on 3,000 test homes. Filling blanks from the ZIP code does not change accuracy (MdAPE 7.08% vs 7.10%).
 
 ```bash
-brew install libomp           # macOS only: OpenMP runtime needed by LightGBM and XGBoost
+streamlit run app.py          # opens http://localhost:8501 (after the steps in Reproduce)
+```
+
+It runs locally only: the model file (39 MB) and the data are git-ignored.
+
+## Reproduce
+
+Requirements: Python 3.11; on macOS, the OpenMP runtime for LightGBM / XGBoost (`brew install libomp`). Every package version is pinned in `requirements.txt`, and seeds are fixed (`random_state=42`).
+
+```bash
 pip install -r requirements.txt
-python src/cleaning.py        # writes data/processed/sfr_clean.csv (+ .parquet) and docs/cleaning_log.csv
-python src/make_figures.py    # regenerates docs/figures/
-python src/preprocessing.py --train-months 12   # writes data/processed/{train,val,test}.csv and docs/split_summary.csv
+
+# 1. Data: put the 28 monthly CRMLSSold*.csv files in data/ (or download with data/crmls_sold.py),
+#    then the school-district boundaries
 mkdir -p data/external && curl -L -o data/external/ca_school_district_areas_2024_25.zip \
   "https://gis.data.ca.gov/api/download/v1/items/b0e3b936426a47ce9d9a2e77e2bb86cc/shapefile?layers=0"
-python src/geo.py             # school-district join -> data/processed/school_districts.parquet
-python src/features.py        # writes docs/leakage_audit.csv
-python src/models.py          # trains all five models on the week6 features (~35 min), writes docs/metrics_*.csv and models/
-python src/models.py lightgbm xgboost                 # only the Week 7 boosting models (~25 min)
-python src/models.py --tuned  # Week 8 wider search for every model (~2 hours; keep the Mac awake)
+
+# 2. Clean, split, features
+python src/cleaning.py        # data/processed/sfr_clean.csv (+ .parquet), docs/cleaning_log.csv
+python src/make_figures.py    # docs/figures/ (exploration charts)
+python src/preprocessing.py   # docs/split_summary.csv
+python src/geo.py             # data/processed/school_districts.parquet
+python src/features.py        # docs/leakage_audit.csv
+
+# 3. Models and evaluation
+python src/models.py --tuned  # every model, Week 8 search (~2 hours; keep the computer awake)
 python src/evaluate_final.py  # final model, docs/metrics_summary.csv, docs/prediction_intervals.csv, figures
-python src/models.py --features week5 random_forest   # a single model / another feature set
+
+# 4. App
+streamlit run app.py
 ```
 
-Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks locally to see their charts and tables.
+Earlier stages can be rerun on their own: `python src/models.py` (Week 5–7 grids, about 35 minutes), `python src/models.py --features week5 random_forest` (one model, another feature set). Notebook outputs are stripped on commit (`nbstripout`), so run the notebooks locally to see their charts and tables; they load the saved results rather than retraining.
 
-## Run the app (Week 9)
+## Assumptions
 
-A local Streamlit app values one home with the final LightGBM model. Enter a ZIP code and the home's details (anything optional can stay blank); it fills in the city, county and coordinates from the ZIP code, looks up the school districts from the coordinates, and shows the estimate with its 80% and 90% likely ranges plus a map.
+Each of these is a judgment call made in the code; the reasoning and checks are in `notebooks/02_preprocessing.ipynb` unless noted.
 
-```bash
-# once: data, school districts, final model and intervals (see How to run)
-python src/cleaning.py && python src/geo.py && python src/models.py --tuned && python src/evaluate_final.py
-streamlit run app.py          # opens http://localhost:8501
-```
-
-- Same preprocessing and model as the evaluation: given the same inputs, the app's prices match the trained pipeline exactly (checked on 3,000 test homes). Filling blank fields from the ZIP code does not change accuracy (test MdAPE 7.08% vs 7.10%, difference within noise).
-- The feature schema is checked against the model's before every prediction, and the app warns when an input is outside the training data (living area, unknown ZIP, coordinates outside California, an estimate outside the training price range).
-- Runs locally only: the trained model (39 MB) and data are git-ignored.
-
-## Data snapshot
-
-- **Source:** CRMLS closed sales, 28 monthly files (`CRMLSSold202401` – `CRMLSSold202604`), downloaded 2026-09-29 through the IDX proxy (`data/crmls_sold.py`; key from the `IDX_PROXY_KEY` environment variable).
-- **Coverage:** sales closed January 2024 – April 2026; California single-family homes only.
-- **School districts:** CA School District Areas 2024-25 (data.ca.gov), downloaded 2026-10-08.
-- Seeds are fixed (`random_state=42`) and every package version is pinned in `requirements.txt`.
+| Assumption | Where |
+|---|---|
+| Rows with the same `ListingKey` are one sale recorded more than once; the most recently updated record is correct (a record with no update date counts as the oldest). | `cleaning.py` |
+| A close/list ratio outside [0.5, 2] is a typo, not a real sale. | `cleaning.py` |
+| A lot size under 10 "sq ft" is acres typed into the square-feet field (99.7% of those lots were smaller than the house itself); lots of 10–499 sq ft have unknown units and become missing. | `cleaning.py` |
+| `BasementYN` and `WaterfrontYN` are only ever recorded as True, so missing means No. | `cleaning.py` |
+| `latfilled` / `lonfilled` mark coordinates that were imputed upstream; they are kept as-is (method unknown). | `cleaning.py` |
+| An HOA fee with no stated payment frequency is monthly (the most common frequency). | `features.py` |
+| Age is measured at the sale date (at the valuation date in the app). | `cleaning.py`, `predict.py` |
+| 2024-25 school-district boundaries apply to every sale from 2024 to 2026. | `geo.py` |
+| A home's price level is the latest in the training data: tree models cannot extrapolate a trend, and a trend feature made validation worse. | `features.py` |
+| In the app, a blank city, county, MLS area or coordinate takes the most common value among past sales in the same ZIP code. | `predict.py` |
 
 ## Limitations
 
 - **The 2026-03 backtest month is also the validation month**, so it is not an independent check; 2026-01 and 2026-02 are.
 - **Cleaning rules that use the sale price** (close/list ratio, price per sq ft, minimum price) also apply to the test month. They remove 359 sales (0.12%), mostly typos, so error on unfiltered data would be slightly higher.
-- **One market, one period:** accuracy outside CRMLS coverage or in a sharply changing market is unknown.
-- **No condition or renovation data.** The worst 5% of predictions are mostly over-valued older homes, likely fixer-uppers.
-- **School-district boundaries are the 2024-25 snapshot**, applied to 2024–2026 sales; district demographics are deliberately excluded (fair-housing risk).
-- **Coordinates in the `_filled` files** were imputed by an unknown method (open question for the team).
+- **One market, one period:** CRMLS coverage (Southern and Central California, parts of the Bay Area), 2024–2026. Accuracy elsewhere, or in a sharply changing market, is unknown.
+- **No condition or renovation data.** The worst 5% of predictions are mostly over-valued older homes (median age 61 vs 49), likely fixer-uppers or distressed sales.
+- **Luxury homes** above $1.67M are under-valued by about 5% and have twice the typical error of mid-priced homes.
+- **Model selection uses a single validation month**, so close calls (LightGBM 6.78% vs XGBoost 6.79%) are within noise.
+- **School-district boundaries are a 2024-25 snapshot.**
+- **Imputed coordinates** in the `_filled` files come from an unknown method (open question for the team).
 
 ## Next steps
 
-- **Split + outlier cut (done):** test = 2026-04, validation = 2026-03; ClosePrice cut at the training set's 0.5th / 99.5th percentile and applied to validation and test. Window lengths compared in `docs/split_summary.csv`.
-- **Preprocessing pipeline (done):** median imputation + missing-value flags, one-hot for county/levels, cross-fitted target encoding for ZIP/city/MLS area/school district, scaling; all fit on training data only (`src/features.py`).
-- **Training window:** picked per model on the **validation** month (24 months for the baseline); test is used once at the end.
-- **Baseline (done):** Linear Regression, see results above.
-- **Week 5 (done):** Decision Tree and Random Forest, see the comparison above.
-- **Week 6 (done):** flooring types + school-district layer, see above.
-- **Week 7 (done):** LightGBM and XGBoost with light tuning, see above.
-- **Week 8 (done):** wider tuning, final evaluation and prediction intervals; LightGBM is the final model.
-- **Week 9 (done):** local Streamlit app (`app.py`), see "Run the app".
-- **Week 10–12:** final README pass, slides, final presentation.
-- Confirm with the team how coordinates were imputed in the `_filled` files.
+Concrete improvements, roughly in order of expected value:
+
+1. **Condition from listing text.** Flag words like "fixer", "as-is", "remodeled" in the public remarks (written before the sale, so not leakage). Condition is the most likely cause of the largest misses.
+2. **Repeat sales.** A home's previous sale price, adjusted for market movement, is a strong signal; it needs a stable property ID (e.g. a hashed parcel number) instead of the dropped address fields.
+3. **Time-weighted comparable sales.** Nearest-sales prices helped Linear Regression a lot; weighting recent and nearby sales more may help the boosted models too.
+4. **Luxury segment:** sample weights or a separate model for homes above about $1.7M.
+5. **More robust selection:** choose settings on several validation months instead of one, and search learning rate and tree count as well (e.g. with Optuna).
+6. **Ensemble:** average LightGBM and XGBoost with weights chosen on validation.
+7. **Monthly retraining and monitoring:** rerun the pipeline as each month closes and alert if MdAPE drifts above about 8%.
+8. **Fair-lending check:** compare error and bias across neighborhoods by demographics, without using demographics as features.
+9. **Deployment:** host the model file so the app can run on Streamlit Community Cloud.
+
+## Repo layout
+
+```
+app.py                    Streamlit app: value one home with the final model
+data/                     raw CRMLS CSVs + download script (git-ignored, never commit)
+  external/               school-district boundary shapefile
+  processed/              sfr_clean.csv (+ .parquet), school_districts.parquet
+docs/
+  data_dictionary.csv     every column: description, type, % missing
+  cleaning_log.csv        rows removed / values changed by each cleaning step
+  split_summary.csv       rows and price cutoffs for each training-window length
+  leakage_audit.csv       every column: used as a feature or excluded, and why
+  feature_set_comparison.csv       Week 6 feature sets, validation and test
+  feature_set_comparison_week8.csv Week 8 feature ideas, validation only
+  metrics_<model>__<features>[__tuned].csv  selection grid, test and backtest for each run
+  metrics_summary.csv     final table: every tuned model by stage, month, price band and county
+  prediction_intervals.csv  final model's 80% / 90% ranges per predicted-price band, with test coverage
+  figures/                charts in this README
+models/                   trained models (git-ignored; rebuilt by src/models.py)
+notebooks/
+  01_exploration.ipynb    exploratory data analysis
+  02_preprocessing.ipynb  cleaning rules, split, preprocessing pipeline
+  03_baseline_model.ipynb Linear Regression baseline
+  04_model_comparison.ipynb      Decision Tree and Random Forest vs baseline
+  04b_feature_engineering.ipynb  school districts, flooring, old vs new feature sets
+  05_advanced_models.ipynb       LightGBM and XGBoost
+  06_evaluation.ipynb     final evaluation: model choice, segments, largest misses, ranges
+src/
+  cleaning.py             cleaning pipeline (thresholds in RULES)
+  preprocessing.py        time split, train-only price cut, shared scoring set
+  features.py             feature sets, preprocessing pipeline, leakage audit
+  geo.py                  school-district spatial join
+  models.py               model registry, selection on validation, test, backtest
+  evaluation.py           metrics, breakdowns, paired bootstrap
+  evaluate_final.py       final model choice, metrics_summary.csv, ranges, figures
+  predict.py              single-home valuation used by the app
+  make_figures.py         exploration charts
+```
+
+## Project timeline
+
+| Week | Work | Notebook / output |
+|---|---|---|
+| 1–2 | Data access, column notes, exploration | `01_exploration.ipynb` |
+| 3 | Cleaning, time split with tunable window, train-only price cut, preprocessing pipeline | `02_preprocessing.ipynb`, cleaned CSV |
+| 4 | Linear Regression baseline: test MdAPE 11.2% (Week 5 features) | `03_baseline_model.ipynb` |
+| 5 | Decision Tree and Random Forest: Random Forest 7.6% | `04_model_comparison.ipynb` |
+| 6 | School-district layer and flooring: Random Forest 7.5% | `04b_feature_engineering.ipynb` |
+| 7 | LightGBM and XGBoost: 7.15% | `05_advanced_models.ipynb` |
+| 8 | Fixed the scoring set, wider tuning, final evaluation and price ranges: **LightGBM 6.96%** | `06_evaluation.ipynb`, `metrics_summary.csv` |
+| 9 | Streamlit prediction app | `app.py` |
+| 10 | Documentation (this README) | `README.md` |
