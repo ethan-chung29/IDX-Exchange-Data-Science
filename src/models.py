@@ -24,6 +24,7 @@ Usage (from the repo root, after cleaning.py and geo.py):
     python src/models.py random_forest                # one model
     python src/models.py --features week5 random_forest
     python src/models.py lightgbm xgboost             # Week 7 boosting models
+    python src/models.py --tuned                      # Week 8 wider search, outputs labeled "tuned"
 """
 
 import ast
@@ -82,6 +83,23 @@ MODELS = {
     ),
 }
 
+# Week 8: wider search around the Week 5/7 choices, which sat on the edge of their grids
+# (largest trees, smallest leaves). Run with --tuned; outputs are labeled "tuned" so the
+# Week 5-7 results stay reproducible. Windows: 3 and 6 months were worse than 12 and 24 for
+# every model and setting in Weeks 5-7 (docs/metrics_*__week6.csv), so only 12 and 24 are searched.
+# objective "l1" / "reg:absoluteerror": on log prices this targets the median absolute
+# percentage error, the headline metric, instead of the mean squared error.
+TUNED = {
+    "baseline_linear_regression": ({}, [12, 24]),
+    "decision_tree": ({"max_depth": [12, 16, 20], "min_samples_leaf": [2, 5, 10]}, [12, 24]),
+    "random_forest": ({"min_samples_leaf": [1, 2], "max_features": [0.2, 0.33]}, [12, 24]),
+    "lightgbm": ({"num_leaves": [255, 511, 1023], "min_child_samples": [5, 10],
+                  "objective": ["regression", "l1"]}, [12, 24]),
+    "xgboost": ({"max_depth": [10, 12, 14], "min_child_weight": [1, 10],
+                 "objective": ["reg:squarederror", "reg:absoluteerror"]}, [12, 24]),
+}
+TUNED_LABEL = "tuned"
+
 
 def make_model(estimator, feature_set=features.DEFAULT_FEATURE_SET):
     return Pipeline([("preprocess", features.build_preprocessor(feature_set)), ("model", estimator)])
@@ -105,11 +123,13 @@ def select(df, estimator_factory, param_grid=None, windows=WINDOWS, test_month=N
            feature_set=features.DEFAULT_FEATURE_SET):
     """Fit every (window, params) combination and score it on the validation month.
 
+    Every combination is scored on the same validation homes (preprocessing.eval_set).
     Returns one row per combination; never touches the test month.
     """
     rows = []
     for w in windows:
-        train, val, _, info = preprocessing.make_split(df, w, test_month)
+        train, _, _, info = preprocessing.make_split(df, w, test_month)
+        val = preprocessing.eval_set(df, info["val_month"])
         for params in ParameterGrid(param_grid or {}):
             model = fit(make_model(estimator_factory(**params), feature_set), train)
             rows.append({"train_months": w, "params": params, "train_start": info["train_start"],
@@ -119,8 +139,14 @@ def select(df, estimator_factory, param_grid=None, windows=WINDOWS, test_month=N
 
 
 def fit_for_test(df, estimator_factory, train_months, test_month=None, feature_set=features.DEFAULT_FEATURE_SET):
-    """Refit on the `train_months` months right before the test month. Returns (model, test, info)."""
-    train, test, info = preprocessing.make_final_split(df, train_months, test_month)
+    """Refit on the `train_months` months right before the test month. Returns (model, test, info).
+
+    `test` is the shared scoring set of the test month (preprocessing.eval_set), so every model
+    is graded on the same homes.
+    """
+    train, _, info = preprocessing.make_final_split(df, train_months, test_month)
+    test = preprocessing.eval_set(df, info["test_month"])
+    info["test_rows"] = len(test)
     return fit(make_model(estimator_factory(), feature_set), train), test, info
 
 
@@ -133,17 +159,18 @@ def backtest(df, estimator_factory, train_months, test_months=BACKTEST_MONTHS,
     return pd.DataFrame(rows)
 
 
-def artifact_stem(name, feature_set):
-    return f"{name}__{feature_set}"
+def artifact_stem(name, feature_set, label=None):
+    return f"{name}__{feature_set}" + (f"__{label}" if label else "")
 
 
-def run(name, estimator_factory, param_grid=None, df=None, save=True, feature_set=features.DEFAULT_FEATURE_SET):
+def run(name, estimator_factory, param_grid=None, df=None, save=True, feature_set=features.DEFAULT_FEATURE_SET,
+        windows=WINDOWS, label=None):
     """Full procedure for one model type and feature set.
 
-    Writes docs/metrics_<name>__<feature set>.csv and models/<name>__<feature set>.joblib.
+    Writes docs/metrics_<stem>.csv and models/<stem>.joblib, stem = <name>__<feature set>[__<label>].
     """
     df = preprocessing.load_clean() if df is None else df
-    selection = select(df, estimator_factory, param_grid, feature_set=feature_set)
+    selection = select(df, estimator_factory, param_grid, windows=windows, feature_set=feature_set)
     best_row = selection.loc[selection["MdAPE"].idxmin()]
     best_window, best_params = int(best_row["train_months"]), best_row["params"]
     chosen = partial(estimator_factory, **best_params)
@@ -163,7 +190,7 @@ def run(name, estimator_factory, param_grid=None, df=None, save=True, feature_se
     ], ignore_index=True)
     summary.insert(0, "model", name)
     summary.insert(1, "feature_set", feature_set)
-    stem = artifact_stem(name, feature_set)
+    stem = artifact_stem(name, feature_set, label)
     summary.to_csv(os.path.join(DOCS_DIR, f"metrics_{stem}.csv"), index=False)
     if save:
         os.makedirs(MODEL_DIR, exist_ok=True)
@@ -175,13 +202,14 @@ def run(name, estimator_factory, param_grid=None, df=None, save=True, feature_se
             "model": model, "test_rows": test, "pred": pred}
 
 
-def compare_feature_sets(df=None, names=None, feature_sets=None, reference_set="week5"):
+def compare_feature_sets(df=None, names=None, feature_sets=None, reference_set="week5",
+                         out_name="feature_set_comparison.csv", score_test=True):
     """Old vs new feature sets (game plan Week 6), holding each model's setup fixed.
 
     Each model keeps the window and hyperparameters it chose on validation with
     `reference_set`, so the only thing that changes between rows is the feature set.
-    Scores the validation month (used to decide which features to adopt) and the test month.
-    Writes docs/feature_set_comparison.csv.
+    Scores the validation month (used to decide which features to adopt) and, if `score_test`,
+    the test month. Writes docs/<out_name>.
     """
     df = preprocessing.load_clean() if df is None else df
     feature_sets = feature_sets or list(features.FEATURE_SETS)
@@ -192,23 +220,33 @@ def compare_feature_sets(df=None, names=None, feature_sets=None, reference_set="
         ref = ref[ref["stage"] == "test"].iloc[0]
         window, params = int(ref["train_months"]), ast.literal_eval(ref["params"])
         chosen = partial(factory, **params)
-        train, val, _, _ = preprocessing.make_split(df, window)
+        train, _, _, info = preprocessing.make_split(df, window)
+        val = preprocessing.eval_set(df, info["val_month"])
         for fs in feature_sets:
-            val_model = fit(make_model(chosen(), fs), train)
-            test_model, test, _ = fit_for_test(df, chosen, window, feature_set=fs)
-            for stage, model, part in (("validation", val_model, val), ("test", test_model, test)):
+            stages = [("validation", fit(make_model(chosen(), fs), train), val)]
+            if score_test:
+                test_model, test, _ = fit_for_test(df, chosen, window, feature_set=fs)
+                stages.append(("test", test_model, test))
+            for stage, model, part in stages:
                 rows.append({"model": name, "feature_set": fs, "stage": stage, "train_months": window,
                              "params": params, **score(model, part)})
-            print(f"{name:28s} {fs:24s} val MdAPE {rows[-2]['MdAPE']:.3f}  test MdAPE {rows[-1]['MdAPE']:.3f}",
-                  flush=True)
+                print(f"{name:28s} {fs:24s} {stage} MdAPE {rows[-1]['MdAPE']:.3f}", flush=True)
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(DOCS_DIR, "feature_set_comparison.csv"), index=False)
+    out.to_csv(os.path.join(DOCS_DIR, out_name), index=False)
     return out
 
 
-def run_all(names=None, df=None, feature_set=features.DEFAULT_FEATURE_SET):
+def run_all(names=None, df=None, feature_set=features.DEFAULT_FEATURE_SET, tuned=False):
     df = preprocessing.load_clean() if df is None else df
-    return {n: run(n, *MODELS[n], df=df, feature_set=feature_set) for n in (names or MODELS)}
+    out = {}
+    for n in names or MODELS:
+        factory, grid = MODELS[n]
+        if tuned:
+            grid, windows = TUNED[n]
+            out[n] = run(n, factory, grid, df=df, feature_set=feature_set, windows=windows, label=TUNED_LABEL)
+        else:
+            out[n] = run(n, factory, grid, df=df, feature_set=feature_set)
+    return out
 
 
 if __name__ == "__main__":
@@ -221,7 +259,9 @@ if __name__ == "__main__":
         i = args.index("--features")
         feature_set = args[i + 1]
         args = args[:i] + args[i + 2:]
-    for name, result in run_all(args or None, feature_set=feature_set).items():
+    tuned = "--tuned" in args
+    args = [a for a in args if a != "--tuned"]
+    for name, result in run_all(args or None, feature_set=feature_set, tuned=tuned).items():
         print(f"\n=== {name} [{feature_set}]: {result['best_window']}-month window, params {result['best_params']}")
         print("test:", {k: round(result["test"][k], 3) for k in cols})
         print(result["backtest"][["test_month"] + cols].to_string(index=False))

@@ -55,3 +55,5 @@ school_district_hs,feature,spatial join of coordinates to CA School District Are
 district_type,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); Unified vs Elementary + High
 district_k8_enrollment,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); district size (demographic shares deliberately excluded)
 district_k8_assistance,feature,spatial join of coordinates to CA School District Areas 2024-25 (public boundary data); state accountability status (school performance)
+sale_month_index,excluded,tested in Week 8; worsened every model on validation (docs/feature_set_comparison_week8.csv)
+nbr_median_log_ppsf,excluded,"tested in Week 8 (with nbr_mean_log_ppsf, nbr_log_dist_km); helped Linear Regression but not the boosted models on validation (docs/feature_set_comparison_week8.csv)"

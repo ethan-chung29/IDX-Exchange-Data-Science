@@ -32,6 +32,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import KFold
+from sklearn.neighbors import KDTree
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler, TargetEncoder
 
@@ -55,6 +56,7 @@ WEEK5 = {
     "low_cardinality": ["CountyOrParish", "Levels"],
     "high_cardinality": ["PostalCode", "City", "MLSAreaMajor", "HighSchoolDistrict"],
     "multi_hot": [],
+    "neighbors": [],
 }
 
 # Week 6 additions, by family
@@ -66,6 +68,9 @@ ADDITIONS = {
         "low_cardinality": ["district_type", "district_k8_assistance"],
         "high_cardinality": ["school_district_k8", "school_district_hs"],
     },
+    # Week 8 candidates
+    "trend": {"numeric": ["sale_month_index"]},
+    "neighbors": {"neighbors": ["Latitude", "Longitude", "LivingArea"]},
 }
 
 
@@ -83,15 +88,21 @@ FEATURE_SETS = {
     # Chosen on the validation month (docs/feature_set_comparison.csv): ratios hurt both tree
     # models, so the final Week 6 set is flooring + school districts.
     "week6": _combine(WEEK5, ADDITIONS["flooring"], ADDITIONS["school_districts"]),
-    "week6+ratios": _combine(WEEK5, *ADDITIONS.values()),
+    "week6+ratios": _combine(WEEK5, ADDITIONS["ratios"], ADDITIONS["flooring"], ADDITIONS["school_districts"]),
 }
+WEEK6 = FEATURE_SETS["week6"]
+FEATURE_SETS.update({
+    "week6+trend": _combine(WEEK6, ADDITIONS["trend"]),
+    "week6+neighbors": _combine(WEEK6, ADDITIONS["neighbors"]),
+    "week6+trend+neighbors": _combine(WEEK6, ADDITIONS["trend"], ADDITIONS["neighbors"]),
+})
 DEFAULT_FEATURE_SET = "week6"
 
 # Columns of the default set, by group (kept as module constants for notebooks and the app)
-LOG_NUMERIC, NUMERIC, BOOLEAN, LOW_CARDINALITY, HIGH_CARDINALITY, MULTI_HOT = (
+LOG_NUMERIC, NUMERIC, BOOLEAN, LOW_CARDINALITY, HIGH_CARDINALITY, MULTI_HOT, NEIGHBORS = (
     FEATURE_SETS[DEFAULT_FEATURE_SET][g]
-    for g in ["log_numeric", "numeric", "boolean", "low_cardinality", "high_cardinality", "multi_hot"])
-FEATURES = LOG_NUMERIC + NUMERIC + BOOLEAN + LOW_CARDINALITY + HIGH_CARDINALITY + MULTI_HOT
+    for g in ["log_numeric", "numeric", "boolean", "low_cardinality", "high_cardinality", "multi_hot", "neighbors"])
+FEATURES = list(dict.fromkeys(LOG_NUMERIC + NUMERIC + BOOLEAN + LOW_CARDINALITY + HIGH_CARDINALITY + MULTI_HOT + NEIGHBORS))
 ALL_COLUMNS = sorted({c for fs in FEATURE_SETS.values() for cols in fs.values() for c in cols})
 
 # Columns in the clean table that are deliberately NOT features, with the reason.
@@ -115,8 +126,12 @@ EXCLUDED = {
     "BuilderName": "too sparse (> 60% missing)",
     "bed_bath_ratio": "tested in Week 6; worsened both tree models on validation (docs/feature_set_comparison.csv)",
     "sqft_per_bedroom": "tested in Week 6; worsened both tree models on validation (docs/feature_set_comparison.csv)",
+    "sale_month_index": "tested in Week 8; worsened every model on validation (docs/feature_set_comparison_week8.csv)",
+    "nbr_median_log_ppsf": "tested in Week 8 (with nbr_mean_log_ppsf, nbr_log_dist_km); helped Linear Regression "
+                           "but not the boosted models on validation (docs/feature_set_comparison_week8.csv)",
 }
 
+TREND_ORIGIN = (2024, 1)  # first month of the data
 FEE_PERIODS_PER_MONTH = {"Monthly": 1, "Quarterly": 3, "SemiAnnually": 6, "Annually": 12}
 
 
@@ -143,7 +158,11 @@ def add_features(df):
         districts = _school_districts().reindex(out["ListingKey"])
         for c in districts.columns:
             out[c] = districts[c].to_numpy()
-    month = pd.to_datetime(out["CloseDate"]).dt.month
+    close = pd.to_datetime(out["CloseDate"])
+    month = close.dt.month
+    # Market trend: months since the start of the data. Trees cannot extrapolate, so a future
+    # month is treated like the latest training month (the current price level).
+    out["sale_month_index"] = (close.dt.year - TREND_ORIGIN[0]) * 12 + (month - TREND_ORIGIN[1])
     out["month_sin"] = np.sin(2 * np.pi * month / 12)
     out["month_cos"] = np.cos(2 * np.pi * month / 12)
     # Assumption: a fee with no stated frequency is monthly (the most common frequency).
@@ -159,7 +178,7 @@ def make_xy(df):
     """
     df = add_features(df)
     X = df[ALL_COLUMNS].copy()
-    groups = {g: {c for fs in FEATURE_SETS.values() for c in fs[g]} for g in WEEK5}
+    groups = {g: {c for fs in FEATURE_SETS.values() for c in fs[g]} for g in WEEK5 if g != "neighbors"}
     for c in groups["boolean"]:
         X[c] = X[c].astype("float")
     for c in groups["low_cardinality"] | groups["high_cardinality"] | groups["multi_hot"]:
@@ -196,6 +215,68 @@ class MultiHot(BaseEstimator, TransformerMixin):
         return np.asarray([f"{name}_{v}" for v in self.vocabulary_] + [f"{name}_missing"], dtype=object)
 
 
+class NeighborPrice(BaseEstimator, TransformerMixin):
+    """Price level of the nearest training sales ("comps"), the core signal of most AVMs.
+
+    Input columns: Latitude, Longitude, LivingArea. Target: log(ClosePrice). For each home,
+    finds the `k` nearest training sales and returns the median and mean of their
+    log(price per sq ft), plus the log distance (km) to the k-th neighbor (how dense the
+    comps are). Learns from y, so it follows the same rule as TargetEncoder:
+    - fit_transform (training rows) is cross-fitted: each fold's rows only see the other
+      folds' sales, so a home's own price never feeds its own feature.
+    - transform (validation / test / app) uses all training sales, which are all earlier.
+    Rows without coordinates get NaN (imputed downstream; the Latitude missing flag marks them).
+    """
+
+    KM_PER_DEGREE = 111.0
+
+    def __init__(self, k=10, cv=5, random_state=RANDOM_STATE):
+        self.k, self.cv, self.random_state = k, cv, random_state
+
+    def _xy_km(self, X):
+        a = np.asarray(X, dtype=float)
+        lat, lon = a[:, 0], a[:, 1]
+        return np.column_stack([lat * self.KM_PER_DEGREE, lon * self.KM_PER_DEGREE * np.cos(np.radians(self.lat0_))])
+
+    def _reference(self, X, y):
+        a = np.asarray(X, dtype=float)
+        ppsf = np.asarray(y, dtype=float) - np.log(a[:, 2])
+        ok = np.isfinite(a[:, 0]) & np.isfinite(a[:, 1]) & np.isfinite(ppsf)
+        return KDTree(self._xy_km(a[ok])), ppsf[ok]
+
+    def _query(self, tree, ppsf, X):
+        pts = self._xy_km(X)
+        out = np.full((len(pts), 3), np.nan)
+        ok = np.isfinite(pts).all(axis=1)
+        if ok.any():
+            dist, idx = tree.query(pts[ok], k=self.k)
+            vals = ppsf[idx]
+            out[ok] = np.column_stack([np.median(vals, axis=1), vals.mean(axis=1), np.log1p(dist[:, -1])])
+        return out
+
+    def fit(self, X, y):
+        a = np.asarray(X, dtype=float)
+        self.lat0_ = float(np.nanmean(a[:, 0]))
+        self.tree_, self.ppsf_ = self._reference(a, y)
+        self.feature_names_in_ = np.asarray(getattr(X, "columns", ["x0", "x1", "x2"]), dtype=object)
+        return self
+
+    def fit_transform(self, X, y):
+        self.fit(X, y)
+        a, y = np.asarray(X, dtype=float), np.asarray(y, dtype=float)
+        out = np.full((len(a), 3), np.nan)
+        for fit_idx, out_idx in KFold(self.cv, shuffle=True, random_state=self.random_state).split(a):
+            tree, ppsf = self._reference(a[fit_idx], y[fit_idx])
+            out[out_idx] = self._query(tree, ppsf, a[out_idx])
+        return out
+
+    def transform(self, X):
+        return self._query(self.tree_, self.ppsf_, X)
+
+    def get_feature_names_out(self, input_features=None):
+        return np.asarray(["nbr_median_log_ppsf", "nbr_mean_log_ppsf", "nbr_log_dist_km"], dtype=object)
+
+
 def build_preprocessor(feature_set=DEFAULT_FEATURE_SET):
     """ColumnTransformer with every fit-time step for one feature set. Fit on training data only."""
     fs = FEATURE_SETS[feature_set]
@@ -223,6 +304,9 @@ def build_preprocessor(feature_set=DEFAULT_FEATURE_SET):
         ("high_card", high_card, fs["high_cardinality"]),
         *[(f"multi_hot_{c}", MultiHot(), [c]) for c in fs["multi_hot"]],
     ]
+    if fs["neighbors"]:
+        neighbors = make_pipeline(NeighborPrice(), SimpleImputer(strategy="median"), StandardScaler())
+        steps.append(("neighbors", neighbors, fs["neighbors"]))
     return ColumnTransformer(steps, remainder="drop", verbose_feature_names_out=False)
 
 
@@ -244,6 +328,8 @@ def leakage_audit(clean_columns):
         "district_type": district + "; Unified vs Elementary + High",
         "district_k8_enrollment": district + "; district size (demographic shares deliberately excluded)",
         "district_k8_assistance": district + "; state accountability status (school performance)",
+        "sale_month_index": "months since 2024-01 of the sale (at prediction time: the valuation month); market trend",
+        "nbr_median_log_ppsf": "median log(price per sq ft) of the 10 nearest training sales; cross-fitted on training data",
     }
     rows = []
     for c in list(clean_columns) + [d for d in derived if d not in clean_columns]:
