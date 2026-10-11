@@ -9,6 +9,9 @@ Rules (IDX Best Practices doc / game plan):
 - Outliers: cut ClosePrice at the 0.5th / 99.5th percentile computed on the TRAINING set only,
   then apply the same frozen cutoffs to validation and test. Computing them on all data would
   leak information from the held-out months.
+- Scoring set: every candidate (window length, model) is scored on the SAME homes of a month,
+  using the cutoffs of the EVAL_WINDOW months before it (eval_set). Otherwise each window's own
+  cutoffs keep slightly different homes, and a short window is graded on more extreme prices.
 
 Usage (from the repo root, after python src/cleaning.py):
     python src/preprocessing.py                      # default 12-month window
@@ -34,6 +37,7 @@ SUMMARY_PATH = os.path.join(REPO_ROOT, "docs", "split_summary.csv")
 DEFAULT_TRAIN_MONTHS = 12
 PRICE_QUANTILES = (0.005, 0.995)
 WINDOWS_TO_COMPARE = [3, 6, 12, 24]
+EVAL_WINDOW = 24  # longest window: its cutoffs define the scoring set of each month
 
 
 def load_clean(path=CLEAN_PATH):
@@ -109,6 +113,15 @@ def make_final_split(df, train_months, test_month=None, quantiles=PRICE_QUANTILE
             "train_end": train["close_month"].max(), "test_month": str(test_period),
             "train_rows": len(train), "price_low": round(cutoffs[0]), "price_high": round(cutoffs[1])}
     return train, test, info
+
+
+def eval_set(df, month, window=EVAL_WINDOW, quantiles=PRICE_QUANTILES):
+    """Homes of `month` used to score every model: inside the price cutoffs of the `window`
+    months before it (training-period data only, so nothing is learned from `month` itself)."""
+    months = pd.PeriodIndex(df["close_month"], freq="M")
+    period = pd.Period(month, freq="M")
+    history = df[(months >= period - window) & (months < period)]
+    return apply_price_cutoffs(df[months == period], fit_price_cutoffs(history, quantiles))
 
 
 def compare_windows(df, windows=WINDOWS_TO_COMPARE, test_month=None):
