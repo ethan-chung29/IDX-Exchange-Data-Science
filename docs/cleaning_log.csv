@@ -2,23 +2,26 @@ step,rows_removed,pct_removed,values_nulled,values_filled,rows_after
 start,0,0.0,0,0,615707
 not Residential / SingleFamilyResidence,305972,49.694,0,0,309735
 state not CA,22,0.007,0,0,309713
+status not Closed,0,0.0,0,0,309713
 duplicate ListingKey (kept latest update),264,0.085,0,0,309449
-CloseDate before ListingContractDate,44,0.014,0,0,309405
-CloseDate before PurchaseContractDate,194,0.063,0,0,309211
-"ClosePrice missing or < $10,000",9,0.003,0,0,309202
-"close/list ratio outside [0.5, 2.0] or no ListPrice",225,0.073,0,0,308977
-"LivingArea missing or outside [300, 20,000]",327,0.106,0,0,308650
-"price per sqft outside [$50, $5,000]",125,0.04,0,0,308525
-YearBuilt < 1850 or after close year + 1,0,0.0,7,0,308525
-BedroomsTotal <= 0 or > 20,0,0.0,116,0,308525
-BathroomsTotalInteger <= 0 or > 20,0,0.0,79,0,308525
-GarageSpaces < 0 or > 20,0,0.0,48,0,308525
-ParkingTotal < 0 or > 50,0,0.0,229,0,308525
-"DaysOnMarket < 0 or > 3,650",0,0.0,42,0,308525
-AssociationFee < 0,0,0.0,0,0,308525
-LotSizeSquareFeet filled from LotSizeAcres,0,0.0,0,21,308525
-"LotSizeSquareFeet <= 0 or > 1,000 acres",0,0.0,350,0,308525
-"LotSizeSquareFeet < 10 treated as acres (x 43,560)",0,0.0,0,337,308525
-LotSizeSquareFeet 10-499 (ambiguous units),0,0.0,46,0,308525
-Latitude/Longitude outside California,0,0.0,62,0,308525
-final,0,0.0,0,0,308525
+"same address re-recorded as a new listing (same close date, or same price within 30 days; kept later record)",181,0.058,0,0,309268
+CloseDate before ListingContractDate,44,0.014,0,0,309224
+CloseDate before PurchaseContractDate,194,0.063,0,0,309030
+"ClosePrice missing or < $10,000",9,0.003,0,0,309021
+"close/list ratio outside [0.5, 2.0] or no ListPrice",225,0.073,0,0,308796
+"LivingArea missing or outside [300, 20,000]",327,0.106,0,0,308469
+"price per sqft outside [$50, $5,000]",125,0.041,0,0,308344
+under 150 sq ft per bedroom or 100 per bathroom,15,0.005,0,0,308329
+YearBuilt < 1850 or after close year + 1,0,0.0,7,0,308329
+BedroomsTotal <= 0 or > 20,0,0.0,115,0,308329
+BathroomsTotalInteger <= 0 or > 20,0,0.0,74,0,308329
+GarageSpaces < 0 or > 20,0,0.0,48,0,308329
+ParkingTotal < 0 or > 50,0,0.0,229,0,308329
+"DaysOnMarket < 0 or > 3,650",0,0.0,42,0,308329
+AssociationFee < 0,0,0.0,0,0,308329
+LotSizeSquareFeet filled from LotSizeAcres,0,0.0,0,21,308329
+"LotSizeSquareFeet <= 0 or > 1,000 acres",0,0.0,349,0,308329
+"LotSizeSquareFeet < 10 treated as acres (x 43,560)",0,0.0,0,337,308329
+LotSizeSquareFeet 10-499 (ambiguous units),0,0.0,46,0,308329
+Latitude/Longitude outside California,0,0.0,62,0,308329
+final,0,0.0,0,0,308329
